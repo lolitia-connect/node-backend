@@ -29,7 +29,7 @@ type NodeStatus struct {
 	Uptime uint64
 }
 
-func (c *ClientV1) ReportNodeStatus(nodeStatus *NodeStatus) (err error) {
+func (c *NodeClient) ReportNodeStatus(nodeStatus *NodeStatus) (err error) {
 	p := "/v1/server/status"
 	status := ServerPushStatusRequest{
 		Cpu:       nodeStatus.CPU,

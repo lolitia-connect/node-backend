@@ -33,7 +33,7 @@ type AliveMap struct {
 	Alive map[int]int `json:"alive"`
 }
 
-func (c *ClientV1) GetUserList(ctx context.Context) ([]UserInfo, error) {
+func (c *NodeClient) GetUserList(ctx context.Context) ([]UserInfo, error) {
 	const p = "/v1/server/user"
 	r, err := c.Client.R().
 		SetContext(ctx).
@@ -90,7 +90,7 @@ func (c *ClientV1) GetUserList(ctx context.Context) ([]UserInfo, error) {
 	return userlist.Users, nil
 }
 
-func (c *ClientV1) GetUserAlive() (map[int]int, error) {
+func (c *NodeClient) GetUserAlive() (map[int]int, error) {
 	c.AliveMap = &AliveMap{}
 	c.AliveMap.Alive = make(map[int]int)
 	/*const path = "/v1/server/alivelist"
@@ -123,7 +123,7 @@ type UserTraffic struct {
 	Download int64 `json:"download"`
 }
 
-func (c *ClientV1) ReportUserTraffic(ctx context.Context, userTraffic *[]UserTraffic) error {
+func (c *NodeClient) ReportUserTraffic(ctx context.Context, userTraffic *[]UserTraffic) error {
 	traffic := make([]UserTraffic, 0)
 	for _, t := range *userTraffic {
 		traffic = append(traffic, UserTraffic{
@@ -152,7 +152,7 @@ func (c *ClientV1) ReportUserTraffic(ctx context.Context, userTraffic *[]UserTra
 	return nil
 }
 
-func (c *ClientV1) ReportNodeOnlineUsers(ctx context.Context, data *[]OnlineUser) error {
+func (c *NodeClient) ReportNodeOnlineUsers(ctx context.Context, data *[]OnlineUser) error {
 	const p = "/v1/server/online"
 	users := UserOnlineBody{
 		Users: *data,

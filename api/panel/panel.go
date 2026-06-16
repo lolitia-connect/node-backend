@@ -13,7 +13,7 @@ import (
 	"github.com/perfect-panel/ppanel-node/conf"
 )
 
-type ClientV1 struct {
+type NodeClient struct {
 	Client    *resty.Client
 	APIHost   string
 	SecretKey string
@@ -24,7 +24,7 @@ type ClientV1 struct {
 	AliveMap  *AliveMap
 }
 
-type ClientV2 struct {
+type ServerClient struct {
 	Client           *resty.Client
 	APIHost          string
 	SecretKey        string
@@ -33,7 +33,7 @@ type ClientV2 struct {
 	responseBodyHash string
 }
 
-func NewClientV1(c *conf.NodeApiConfig) (*ClientV1, error) {
+func NewNodeClient(c *conf.NodeApiConfig) (*NodeClient, error) {
 	client := resty.New()
 	client.SetRetryCount(0)
 	if c.Timeout > 0 {
@@ -69,7 +69,7 @@ func NewClientV1(c *conf.NodeApiConfig) (*ClientV1, error) {
 		"server_id":  strconv.Itoa(c.NodeID),
 		"secret_key": c.SecretKey,
 	})
-	return &ClientV1{
+	return &NodeClient{
 		Client:    client,
 		SecretKey: c.SecretKey,
 		APIHost:   c.APIHost,
@@ -80,7 +80,7 @@ func NewClientV1(c *conf.NodeApiConfig) (*ClientV1, error) {
 	}, nil
 }
 
-func NewClientV2(c *conf.ServerApiConfig) *ClientV2 {
+func NewServerClient(c *conf.ServerApiConfig) *ServerClient {
 	client := resty.New()
 	client.SetRetryCount(0)
 	if c.Timeout > 0 {
@@ -98,7 +98,7 @@ func NewClientV2(c *conf.ServerApiConfig) *ClientV2 {
 	client.SetQueryParams(map[string]string{
 		"secret_key": c.SecretKey,
 	})
-	return &ClientV2{
+	return &ServerClient{
 		Client:    client,
 		APIHost:   c.ApiHost,
 		SecretKey: c.SecretKey,
