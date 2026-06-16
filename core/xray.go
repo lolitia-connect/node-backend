@@ -10,6 +10,7 @@ import (
 	"github.com/perfect-panel/ppanel-node/conf"
 	"github.com/perfect-panel/ppanel-node/core/app/dispatcher"
 	_ "github.com/perfect-panel/ppanel-node/core/distro/all"
+	"github.com/perfect-panel/ppanel-node/limiter"
 	log "github.com/sirupsen/logrus"
 	"github.com/xtls/xray-core/app/proxyman"
 	"github.com/xtls/xray-core/app/stats"
@@ -30,11 +31,12 @@ type AddUsersParams struct {
 
 type XrayCore struct {
 	Config                      *conf.Conf
-	Client                      *panel.ClientV2
+	Client                      *panel.ServerClient
 	ReloadCh                    chan struct{}
 	serverConfigMonitorPeriodic *task.Task
 	access                      sync.Mutex
 	Server                      *core.Instance
+	LimiterManager              *limiter.Manager
 	users                       *UserMap
 	ihm                         inbound.Manager
 	ohm                         outbound.Manager
@@ -46,10 +48,11 @@ type UserMap struct {
 	mapLock sync.RWMutex
 }
 
-func New(config *conf.Conf, client *panel.ClientV2) *XrayCore {
+func New(config *conf.Conf, client *panel.ServerClient) *XrayCore {
 	core := &XrayCore{
-		Config: config,
-		Client: client,
+		Config:         config,
+		Client:         client,
+		LimiterManager: limiter.NewManager(),
 		users: &UserMap{
 			uidMap: make(map[string]int),
 		},
@@ -67,6 +70,7 @@ func (v *XrayCore) Start(serverconfig *panel.ServerConfigResponse) error {
 	v.ihm = v.Server.GetFeature(inbound.ManagerType()).(inbound.Manager)
 	v.ohm = v.Server.GetFeature(outbound.ManagerType()).(outbound.Manager)
 	v.dispatcher = v.Server.GetFeature(routing.DispatcherType()).(*dispatcher.DefaultDispatcher)
+	v.dispatcher.LimiterManager = v.LimiterManager
 	v.startTasks(serverconfig)
 	return nil
 }
@@ -81,6 +85,7 @@ func (v *XrayCore) Close() error {
 	v.ihm = nil
 	v.ohm = nil
 	v.dispatcher = nil
+	v.LimiterManager = nil
 	err := v.Server.Close()
 	if err != nil {
 		return err

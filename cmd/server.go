@@ -13,7 +13,6 @@ import (
 	"github.com/perfect-panel/ppanel-node/api/panel"
 	"github.com/perfect-panel/ppanel-node/conf"
 	"github.com/perfect-panel/ppanel-node/core"
-	"github.com/perfect-panel/ppanel-node/limiter"
 	"github.com/perfect-panel/ppanel-node/node"
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
@@ -80,8 +79,7 @@ func serverHandle(_ *cobra.Command, _ []string) {
 			}
 		}()
 	}
-	limiter.Init()
-	p := panel.NewClientV2(&c.ApiConfig)
+	p := panel.NewServerClient(&c.ApiConfig)
 	serverconfig, err := panel.GetServerConfig(context.Background(), p)
 	if err != nil {
 		log.WithField("err", err).Error("获取服务端配置失败")
@@ -158,7 +156,7 @@ func reload(config string, nodes **node.Node, xcore **core.XrayCore) error {
 	if err := newConf.LoadFromPath(config); err != nil {
 		return err
 	}
-	p := panel.NewClientV2(&newConf.ApiConfig)
+	p := panel.NewServerClient(&newConf.ApiConfig)
 	serverconfig, err := panel.GetServerConfig(context.Background(), p)
 	if err != nil {
 		log.WithField("err", err).Error("获取服务端配置失败")

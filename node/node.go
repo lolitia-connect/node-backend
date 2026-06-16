@@ -6,6 +6,7 @@ import (
 	"github.com/perfect-panel/ppanel-node/api/panel"
 	"github.com/perfect-panel/ppanel-node/conf"
 	vCore "github.com/perfect-panel/ppanel-node/core"
+	log "github.com/sirupsen/logrus"
 )
 
 type Node struct {
@@ -33,7 +34,7 @@ func New(core *vCore.XrayCore, config *conf.Conf, serverconfig *panel.ServerConf
 			PullInterval:           pullinterval,
 			Protocol:               &nodeconfig,
 		}
-		p, err := panel.NewClientV1(&conf.NodeApiConfig{
+		p, err := panel.NewNodeClient(&conf.NodeApiConfig{
 			APIHost:   config.ApiConfig.ApiHost,
 			NodeType:  nodeconfig.Type,
 			NodeID:    config.ApiConfig.ServerId,
@@ -67,9 +68,8 @@ func (n *Node) Start() error {
 
 func (n *Node) Close() {
 	for _, c := range n.controllers {
-		err := c.Close()
-		if err != nil {
-			panic(err)
+		if err := c.Close(); err != nil {
+			log.WithField("err", err).Error("关闭节点控制器失败")
 		}
 	}
 	n.controllers = nil

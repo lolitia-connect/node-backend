@@ -14,7 +14,7 @@ import (
 
 type Controller struct {
 	server                  *vCore.XrayCore
-	apiClient               *panel.ClientV1
+	apiClient               *panel.NodeClient
 	tag                     string
 	limiter                 *limiter.Limiter
 	userList                []panel.UserInfo
@@ -27,7 +27,7 @@ type Controller struct {
 }
 
 // NewController return a Node controller with default parameters.
-func NewController(core *vCore.XrayCore, api *panel.ClientV1, info *panel.NodeInfo) *Controller {
+func NewController(core *vCore.XrayCore, api *panel.NodeClient, info *panel.NodeInfo) *Controller {
 	controller := &Controller{
 		server:    core,
 		apiClient: api,
@@ -54,7 +54,7 @@ func (c *Controller) Start() error {
 	c.tag = c.buildNodeTag(c.info)
 
 	// add limiter
-	l := limiter.AddLimiter(c.tag, c.userList, c.aliveMap)
+	l := c.server.LimiterManager.Add(c.tag, c.userList, c.aliveMap)
 	c.limiter = l
 
 	if c.info.Protocol.Security == "tls" {
@@ -83,7 +83,7 @@ func (c *Controller) Start() error {
 
 // Close implement the Close() function of the service interface
 func (c *Controller) Close() error {
-	limiter.DeleteLimiter(c.tag)
+	c.server.LimiterManager.Delete(c.tag)
 	if c.userListMonitorPeriodic != nil {
 		c.userListMonitorPeriodic.Close()
 	}
