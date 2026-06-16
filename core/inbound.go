@@ -2,15 +2,11 @@ package core
 
 import (
 	"context"
-	"crypto/rand"
-	"encoding/base64"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"path/filepath"
 	"strconv"
-	"strings"
 	"time"
 
 	"github.com/perfect-panel/ppanel-node/api/panel"
@@ -140,288 +136,36 @@ func buildInbound(nodeInfo *panel.NodeInfo, tag string) (*core.InboundHandlerCon
 	return in.Build()
 }
 
-func buildVLess(nodeInfo *panel.NodeInfo, inbound *coreConf.InboundDetourConfig) error {
-	inbound.Protocol = "vless"
-	var err error
-	decryption := "none"
-	if nodeInfo.Protocol.Encryption != "" && nodeInfo.Protocol.Encryption != "none" {
-		switch nodeInfo.Protocol.Encryption {
-		case "mlkem768x25519plus":
-			parts := []string{
-				"mlkem768x25519plus",
-				nodeInfo.Protocol.EncryptionMode,
-				nodeInfo.Protocol.EncryptionTicket + "s",
-			}
-			if nodeInfo.Protocol.EncryptionServerPadding != "" {
-				parts = append(parts, nodeInfo.Protocol.EncryptionServerPadding)
-			}
-			parts = append(parts, nodeInfo.Protocol.EncryptionPrivateKey)
-			decryption = strings.Join(parts, ".")
-		default:
-			return fmt.Errorf("vless decryption method %s is not support", nodeInfo.Protocol.Encryption)
-		}
-	}
-	s, err := json.Marshal(&coreConf.VLessInboundConfig{
-		Decryption: decryption,
-	})
-	if err != nil {
-		return fmt.Errorf("marshal vless config error: %s", err)
-	}
-	inbound.Settings = (*json.RawMessage)(&s)
+func buildTransportSetting(nodeInfo *panel.NodeInfo) (*coreConf.StreamConfig, error) {
 	t := coreConf.TransportProtocol(nodeInfo.Protocol.Transport)
-	inbound.StreamSetting = &coreConf.StreamConfig{Network: &t}
+	stream := &coreConf.StreamConfig{Network: &t}
 	switch nodeInfo.Protocol.Transport {
 	case "tcp":
-		inbound.StreamSetting.TCPSettings = &coreConf.TCPConfig{}
+		stream.TCPSettings = &coreConf.TCPConfig{}
 	case "ws", "websocket":
-		inbound.StreamSetting.WSSettings = &coreConf.WebSocketConfig{
+		stream.WSSettings = &coreConf.WebSocketConfig{
 			Host: nodeInfo.Protocol.Host,
 			Path: nodeInfo.Protocol.Path,
 		}
 	case "grpc":
-		inbound.StreamSetting.GRPCSettings = &coreConf.GRPCConfig{
+		stream.GRPCSettings = &coreConf.GRPCConfig{
 			ServiceName: nodeInfo.Protocol.ServiceName,
 		}
-	/*case "mkcp":
-	inbound.StreamSetting.KCPSettings = &coreConf.KCPConfig{
-	}*/
 	case "httpupgrade":
-		inbound.StreamSetting.HTTPUPGRADESettings = &coreConf.HttpUpgradeConfig{
+		stream.HTTPUPGRADESettings = &coreConf.HttpUpgradeConfig{
 			Host: nodeInfo.Protocol.Host,
 			Path: nodeInfo.Protocol.Path,
 		}
 	case "splithttp", "xhttp":
-		inbound.StreamSetting.SplitHTTPSettings = &coreConf.SplitHTTPConfig{
+		stream.SplitHTTPSettings = &coreConf.SplitHTTPConfig{
 			Host: nodeInfo.Protocol.Host,
 			Path: nodeInfo.Protocol.Path,
 			Mode: nodeInfo.Protocol.XHTTPMode,
-			//Extra: json.RawMessage(nodeInfo.Protocol.XHTTPExtra),
 		}
 	default:
-		return errors.New("the network type is not vail")
+		return nil, errors.New("the network type is not vail")
 	}
-	return nil
+	return stream, nil
 }
 
-func buildVMess(nodeInfo *panel.NodeInfo, inbound *coreConf.InboundDetourConfig) error {
-	inbound.Protocol = "vmess"
-	var err error
-	s, err := json.Marshal(&coreConf.VMessInboundConfig{})
-	if err != nil {
-		return fmt.Errorf("marshal vmess settings error: %s", err)
-	}
-	inbound.Settings = (*json.RawMessage)(&s)
-	t := coreConf.TransportProtocol(nodeInfo.Protocol.Transport)
-	inbound.StreamSetting = &coreConf.StreamConfig{Network: &t}
-	switch nodeInfo.Protocol.Transport {
-	case "tcp":
-		inbound.StreamSetting.TCPSettings = &coreConf.TCPConfig{}
-	case "ws", "websocket":
-		inbound.StreamSetting.WSSettings = &coreConf.WebSocketConfig{
-			Host: nodeInfo.Protocol.Host,
-			Path: nodeInfo.Protocol.Path,
-		}
-	case "grpc":
-		inbound.StreamSetting.GRPCSettings = &coreConf.GRPCConfig{
-			ServiceName: nodeInfo.Protocol.ServiceName,
-		}
-	/*case "mkcp":
-	inbound.StreamSetting.KCPSettings = &coreConf.KCPConfig{
-	}*/
-	case "httpupgrade":
-		inbound.StreamSetting.HTTPUPGRADESettings = &coreConf.HttpUpgradeConfig{
-			Host: nodeInfo.Protocol.Host,
-			Path: nodeInfo.Protocol.Path,
-		}
-	case "splithttp", "xhttp":
-		inbound.StreamSetting.SplitHTTPSettings = &coreConf.SplitHTTPConfig{
-			Host: nodeInfo.Protocol.Host,
-			Path: nodeInfo.Protocol.Path,
-			Mode: nodeInfo.Protocol.XHTTPMode,
-			//Extra: json.RawMessage(nodeInfo.Protocol.XHTTPExtra),
-		}
-	default:
-		return errors.New("the network type is not vail")
-	}
-	return nil
-}
 
-func buildTrojan(nodeInfo *panel.NodeInfo, inbound *coreConf.InboundDetourConfig) error {
-	inbound.Protocol = "trojan"
-	s, err := json.Marshal(&coreConf.TrojanServerConfig{})
-	if err != nil {
-		return fmt.Errorf("marshal trojan settings error: %s", err)
-	}
-	inbound.Settings = (*json.RawMessage)(&s)
-	network := nodeInfo.Protocol.Transport
-	t := coreConf.TransportProtocol(network)
-	inbound.StreamSetting = &coreConf.StreamConfig{Network: &t}
-	switch network {
-	case "tcp":
-		inbound.StreamSetting.TCPSettings = &coreConf.TCPConfig{}
-	case "ws", "websocket":
-		inbound.StreamSetting.WSSettings = &coreConf.WebSocketConfig{
-			Host: nodeInfo.Protocol.Host,
-			Path: nodeInfo.Protocol.Path,
-		}
-	case "grpc":
-		inbound.StreamSetting.GRPCSettings = &coreConf.GRPCConfig{
-			ServiceName: nodeInfo.Protocol.ServiceName,
-		}
-	default:
-		return errors.New("the network type is not vail")
-	}
-	return nil
-}
-
-func buildShadowsocks(nodeInfo *panel.NodeInfo, inbound *coreConf.InboundDetourConfig) error {
-	inbound.Protocol = "shadowsocks"
-	cipher := nodeInfo.Protocol.Cipher
-	settings := &coreConf.ShadowsocksServerConfig{
-		Cipher: cipher,
-	}
-	p := make([]byte, 32)
-	_, err := rand.Read(p)
-	if err != nil {
-		return fmt.Errorf("generate random password error: %s", err)
-	}
-	randomPasswd := hex.EncodeToString(p)
-
-	if nodeInfo.Protocol.ServerKey != "" && strings.Contains(cipher, "2022") {
-		nodeInfo.Protocol.ServerKey = base64.StdEncoding.EncodeToString([]byte(nodeInfo.Protocol.ServerKey))
-		settings.Password = nodeInfo.Protocol.ServerKey
-		randomPasswd = base64.StdEncoding.EncodeToString([]byte(randomPasswd))
-		cipher = ""
-	}
-	defaultSSuser := &coreConf.ShadowsocksUserConfig{
-		Cipher:   cipher,
-		Password: randomPasswd,
-	}
-	settings.Users = append(settings.Users, defaultSSuser)
-	settings.NetworkList = &coreConf.NetworkList{"tcp", "udp"}
-
-	if nodeInfo.Protocol.Obfs != "" && nodeInfo.Protocol.Obfs == "http" {
-		if nodeInfo.Protocol.ObfsPath != "" || nodeInfo.Protocol.ObfsHost != "" {
-			settings.NetworkList = &coreConf.NetworkList{"tcp"}
-		}
-		t := coreConf.TransportProtocol("tcp")
-		inbound.StreamSetting = &coreConf.StreamConfig{Network: &t}
-		inbound.StreamSetting.TCPSettings = &coreConf.TCPConfig{}
-		//inbound.StreamSetting.TCPSettings.AcceptProxyProtocol = false
-
-		httpHeader := map[string]interface{}{
-			"type":    "http",
-			"request": map[string]interface{}{},
-		}
-		request := httpHeader["request"].(map[string]interface{})
-
-		path := nodeInfo.Protocol.ObfsPath
-		if path == "" {
-			path = "/"
-		}
-		request["path"] = []string{path}
-
-		if nodeInfo.Protocol.ObfsHost != "" {
-			request["headers"] = map[string]interface{}{
-				"Host": []string{nodeInfo.Protocol.ObfsHost},
-			}
-		}
-		headerJSON, err := json.Marshal(httpHeader)
-		if err == nil {
-			inbound.StreamSetting.TCPSettings.HeaderConfig = json.RawMessage(headerJSON)
-		}
-	}
-
-	sets, err := json.Marshal(settings)
-	inbound.Settings = (*json.RawMessage)(&sets)
-	if err != nil {
-		return fmt.Errorf("marshal shadowsocks settings error: %s", err)
-	}
-	return nil
-}
-
-func buildHysteria2(nodeInfo *panel.NodeInfo, inbound *coreConf.InboundDetourConfig) error {
-	inbound.Protocol = "hysteria"
-	settings := &coreConf.HysteriaServerConfig{
-		Version: 2,
-	}
-	t := coreConf.TransportProtocol("hysteria")
-	up := coreConf.Bandwidth(strconv.Itoa(nodeInfo.Protocol.UpMbps) + "mbps")
-	down := coreConf.Bandwidth(strconv.Itoa(nodeInfo.Protocol.DownMbps) + "mbps")
-	inbound.StreamSetting = &coreConf.StreamConfig{Network: &t}
-	hysteriasetting := &coreConf.HysteriaConfig{
-		Version: 2,
-	}
-
-	finalmask := &coreConf.FinalMask{}
-	obfs := nodeInfo.Protocol.Obfs
-	obfs_password := nodeInfo.Protocol.ObfsPassword
-	if obfs != "" {
-		if obfs == "none" {
-			obfs = ""
-			obfs_password = ""
-		}
-	}
-	if nodeInfo.Protocol.UpMbps > 0 || nodeInfo.Protocol.DownMbps > 0 {
-		finalmask.QuicParams = &coreConf.QuicParamsConfig{
-			Congestion: "force-brutal",
-			BrutalUp:   up,
-			BrutalDown: down,
-		}
-	}
-	if obfs != "" && obfs_password != "" {
-		rawobfsJSON := json.RawMessage(fmt.Sprintf(`{"password":"%s"}`, obfs_password))
-		udp := []coreConf.Mask{
-			{
-				Type:     obfs,
-				Settings: &rawobfsJSON,
-			},
-		}
-		finalmask.Udp = udp
-	}
-
-	inbound.StreamSetting.FinalMask = finalmask
-	sets, err := json.Marshal(settings)
-	inbound.Settings = (*json.RawMessage)(&sets)
-	inbound.StreamSetting.HysteriaSettings = hysteriasetting
-	if err != nil {
-		return fmt.Errorf("marshal hysteria2 settings error: %s", err)
-	}
-	return nil
-}
-
-func buildTuic(nodeInfo *panel.NodeInfo, inbound *coreConf.InboundDetourConfig) error {
-	inbound.Protocol = "tuic"
-	settings := &coreConf.TuicServerConfig{
-		CongestionControl: nodeInfo.Protocol.CongestionController,
-		ZeroRttHandshake:  nodeInfo.Protocol.ReduceRTT,
-	}
-	t := coreConf.TransportProtocol("tuic")
-	inbound.StreamSetting = &coreConf.StreamConfig{Network: &t}
-	sets, err := json.Marshal(settings)
-	inbound.Settings = (*json.RawMessage)(&sets)
-	if err != nil {
-		return fmt.Errorf("marshal tuic settings error: %s", err)
-	}
-	return nil
-}
-
-func buildAnyTLS(nodeInfo *panel.NodeInfo, inbound *coreConf.InboundDetourConfig) error {
-	inbound.Protocol = "anytls"
-	var padding []string
-	//nodeInfo.Protocol.PaddingScheme "stop=8\n0=30-30\n1=100-400\n2=400-500,c,500-1000,c,500-1000,c,500-1000,c,500-1000\n3=9-9,500-1000\n4=500-1000\n5=500-1000\n6=500-1000\n7=500-1000"
-	if nodeInfo.Protocol.PaddingScheme != "" {
-		padding = strings.Split(nodeInfo.Protocol.PaddingScheme, "\n")
-	}
-	settings := &coreConf.AnyTLSServerConfig{
-		PaddingScheme: padding,
-	}
-	t := coreConf.TransportProtocol("tcp")
-	inbound.StreamSetting = &coreConf.StreamConfig{Network: &t}
-	sets, err := json.Marshal(settings)
-	inbound.Settings = (*json.RawMessage)(&sets)
-	if err != nil {
-		return fmt.Errorf("marshal anytls settings error: %s", err)
-	}
-	return nil
-}
