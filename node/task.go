@@ -162,14 +162,14 @@ func (c *Controller) reportUserTrafficTask(ctx context.Context) (err error) {
 			log.WithFields(log.Fields{
 				"tag": c.tag,
 				"err": err,
-			}).Info("Report user traffic failed")
+			}).Error("Report user traffic failed")
 		} else {
 			log.WithField("节点", c.tag).Infof("已上报 %d 名用户消耗流量", len(userTraffic))
 		}
 	}
 
 	if onlineDevice, err := c.limiter.GetOnlineDevice(); err != nil {
-		log.Print(err)
+		log.WithField("err", err).Error("获取在线设备失败")
 	} else if len(*onlineDevice) > 0 {
 		// Only report user has traffic > 100kb to allow ping test
 		var result []panel.OnlineUser
@@ -189,7 +189,7 @@ func (c *Controller) reportUserTrafficTask(ctx context.Context) (err error) {
 			log.WithFields(log.Fields{
 				"tag": c.tag,
 				"err": err,
-			}).Info("Report online users failed")
+			}).Error("Report online users failed")
 		} else {
 			log.WithField("节点", c.tag).Infof("总计 %d 名在线用户, %d 名已上报", len(*onlineDevice), len(result))
 		}
@@ -197,7 +197,7 @@ func (c *Controller) reportUserTrafficTask(ctx context.Context) (err error) {
 
 	CPU, Mem, Disk, Uptime, err := serverstatus.GetSystemInfo()
 	if err != nil {
-		log.Print(err)
+		log.WithField("err", err).Error("获取系统信息失败")
 	}
 	err = c.apiClient.ReportNodeStatus(
 		&panel.NodeStatus{
@@ -207,7 +207,7 @@ func (c *Controller) reportUserTrafficTask(ctx context.Context) (err error) {
 			Uptime: Uptime,
 		})
 	if err != nil {
-		log.Print(err)
+		log.WithField("err", err).Error("上报节点状态失败")
 	}
 
 	userTraffic = nil
