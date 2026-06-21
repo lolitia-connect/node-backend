@@ -6,7 +6,7 @@ import (
 	"sync"
 	"time"
 
-	log "github.com/sirupsen/logrus"
+	"github.com/perfect-panel/ppanel-node/common/logx"
 )
 
 type Task struct {
@@ -47,7 +47,7 @@ func (t *Task) Start(first bool) error {
 			}
 
 			if err := t.ExecuteWithTimeout(); err != nil {
-				log.Errorf("Task %s execution error: %v", t.Name, err)
+				logx.Task(t.Name).WithError(err).Error("任务执行失败")
 				return
 			}
 		}
@@ -67,14 +67,15 @@ func (t *Task) ExecuteWithTimeout() error {
 
 	select {
 	case <-ctx.Done():
-		log.Errorf("Task %s execution timed out, reloading", t.Name)
+		logger := logx.Task(t.Name)
+		logger.Warn("任务执行超时，已投递重载信号")
 		if t.ReloadCh != nil {
 			select {
 			case t.ReloadCh <- struct{}{}:
 			default:
 			}
 		} else {
-			log.Panic("Reload failed")
+			logger.Error("任务执行超时但重载通道为空")
 		}
 		return nil
 	case err := <-done:
@@ -96,5 +97,5 @@ func (t *Task) safeStop() {
 
 func (t *Task) Close() {
 	t.safeStop()
-	log.Warningf("Task %s stopped", t.Name)
+	logx.Task(t.Name).Warn("任务已停止")
 }

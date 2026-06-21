@@ -4,10 +4,11 @@ import (
 	"fmt"
 
 	"github.com/perfect-panel/ppanel-node/api/panel"
+	inboundbuilder "github.com/perfect-panel/ppanel-node/core/inbound"
 )
 
 func (v *XrayCore) AddNode(tag string, info *panel.NodeInfo) error {
-	inBoundConfig, err := buildInbound(info, tag)
+	inBoundConfig, err := inboundbuilder.Build(info, tag)
 	if err != nil {
 		return fmt.Errorf("build inbound error: %s", err)
 	}

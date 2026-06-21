@@ -1,4 +1,4 @@
-package core
+package inbound
 
 import (
 	"encoding/json"

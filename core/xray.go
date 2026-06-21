@@ -6,12 +6,12 @@ import (
 	"time"
 
 	"github.com/perfect-panel/ppanel-node/api/panel"
+	"github.com/perfect-panel/ppanel-node/common/logx"
 	"github.com/perfect-panel/ppanel-node/common/task"
 	"github.com/perfect-panel/ppanel-node/conf"
 	"github.com/perfect-panel/ppanel-node/core/app/dispatcher"
 	_ "github.com/perfect-panel/ppanel-node/core/distro/all"
 	"github.com/perfect-panel/ppanel-node/limiter"
-	log "github.com/sirupsen/logrus"
 	"github.com/xtls/xray-core/app/proxyman"
 	"github.com/xtls/xray-core/app/stats"
 	"github.com/xtls/xray-core/common/serial"
@@ -76,17 +76,26 @@ func (v *XrayCore) Start(serverconfig *panel.ServerConfigResponse) error {
 }
 
 func (v *XrayCore) Close() error {
+	if v == nil {
+		return nil
+	}
 	v.access.Lock()
 	defer v.access.Unlock()
 	if v.serverConfigMonitorPeriodic != nil {
 		v.serverConfigMonitorPeriodic.Close()
+		v.serverConfigMonitorPeriodic = nil
 	}
+	server := v.Server
 	v.Config = nil
 	v.ihm = nil
 	v.ohm = nil
 	v.dispatcher = nil
 	v.LimiterManager = nil
-	err := v.Server.Close()
+	v.Server = nil
+	if server == nil {
+		return nil
+	}
+	err := server.Close()
 	if err != nil {
 		return err
 	}
@@ -103,7 +112,7 @@ func getCore(c *conf.Conf, serverconfig *panel.ServerConfigResponse) *core.Insta
 	// Custom config
 	dnsConfig, outBoundConfig, routeConfig, err := GetCustomConfig(serverconfig)
 	if err != nil {
-		log.WithField("err", err).Panic("failed to build custom config")
+		logx.Component("xray").WithError(err).Panic("构建自定义配置失败")
 	}
 	// Inbound config
 	var inBoundConfig []*core.InboundHandlerConfig
@@ -138,7 +147,7 @@ func getCore(c *conf.Conf, serverconfig *panel.ServerConfigResponse) *core.Insta
 	}
 	server, err := core.New(config)
 	if err != nil {
-		log.WithField("err", err).Panic("failed to create instance")
+		logx.Component("xray").WithError(err).Panic("创建Xray实例失败")
 	}
 	return server
 }
@@ -160,11 +169,11 @@ func (c *XrayCore) startTasks(serverconfig *panel.ServerConfigResponse) {
 func (c *XrayCore) ServerConfigMonitor(ctx context.Context) (err error) {
 	newServerConfig, err := panel.GetServerConfig(ctx, c.Client)
 	if err != nil {
-		log.WithField("err", err).Error("获取服务端配置失败")
+		logx.Component("xray").WithError(err).Error("获取服务端配置失败")
 		return nil
 	}
 	if newServerConfig != nil {
-		log.Error("检测到服务端配置变更，正在重启节点...")
+		logx.Component("xray").Info("检测到服务端配置变更，已投递重载信号")
 		// Non-blocking signal to avoid goroutine stuck when channel is full or nil
 		if c.ReloadCh != nil {
 			select {

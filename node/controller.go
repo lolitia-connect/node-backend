@@ -6,10 +6,10 @@ import (
 	"fmt"
 
 	"github.com/perfect-panel/ppanel-node/api/panel"
+	"github.com/perfect-panel/ppanel-node/common/logx"
 	"github.com/perfect-panel/ppanel-node/common/task"
 	vCore "github.com/perfect-panel/ppanel-node/core"
 	"github.com/perfect-panel/ppanel-node/limiter"
-	log "github.com/sirupsen/logrus"
 )
 
 type Controller struct {
@@ -76,30 +76,43 @@ func (c *Controller) Start() error {
 	if err != nil {
 		return fmt.Errorf("add users error: %s", err)
 	}
-	log.WithField("节点", c.tag).Infof("已添加 %d 个新用户", added)
+	logx.Node(c.tag).WithField("user_added", added).Info("已添加新用户")
 	c.startTasks(c.info)
 	return nil
 }
 
 // Close implement the Close() function of the service interface
 func (c *Controller) Close() error {
-	c.server.LimiterManager.Delete(c.tag)
+	if c == nil {
+		return nil
+	}
+	if c.server != nil && c.server.LimiterManager != nil && c.tag != "" {
+		c.server.LimiterManager.Delete(c.tag)
+	}
 	if c.userListMonitorPeriodic != nil {
 		c.userListMonitorPeriodic.Close()
+		c.userListMonitorPeriodic = nil
 	}
 	if c.userReportPeriodic != nil {
 		c.userReportPeriodic.Close()
+		c.userReportPeriodic = nil
 	}
 	if c.renewCertPeriodic != nil {
 		c.renewCertPeriodic.Close()
+		c.renewCertPeriodic = nil
 	}
 	if c.onlineIpReportPeriodic != nil {
 		c.onlineIpReportPeriodic.Close()
+		c.onlineIpReportPeriodic = nil
+	}
+	if c.server == nil || c.tag == "" {
+		return nil
 	}
 	err := c.server.DelNode(c.tag)
 	if err != nil {
 		return fmt.Errorf("del node error: %s", err)
 	}
+	c.tag = ""
 	return nil
 }
 

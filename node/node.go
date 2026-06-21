@@ -4,9 +4,9 @@ import (
 	"fmt"
 
 	"github.com/perfect-panel/ppanel-node/api/panel"
+	"github.com/perfect-panel/ppanel-node/common/logx"
 	"github.com/perfect-panel/ppanel-node/conf"
 	vCore "github.com/perfect-panel/ppanel-node/core"
-	log "github.com/sirupsen/logrus"
 )
 
 type Node struct {
@@ -67,9 +67,15 @@ func (n *Node) Start() error {
 }
 
 func (n *Node) Close() {
+	if n == nil {
+		return
+	}
 	for _, c := range n.controllers {
+		if c == nil {
+			continue
+		}
 		if err := c.Close(); err != nil {
-			log.WithField("err", err).Error("关闭节点控制器失败")
+			logx.Node(c.tag).WithError(err).Error("关闭节点控制器失败")
 		}
 	}
 	n.controllers = nil

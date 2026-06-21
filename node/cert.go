@@ -15,18 +15,18 @@ import (
 	"time"
 
 	"github.com/perfect-panel/ppanel-node/common/file"
-	log "github.com/sirupsen/logrus"
+	"github.com/perfect-panel/ppanel-node/common/logx"
 )
 
 func (c *Controller) renewCertTask(_ context.Context) error {
 	l, err := NewLego(c.info)
 	if err != nil {
-		log.WithField("节点", c.tag).Info("new lego error: ", err)
+		logx.Node(c.tag).WithError(err).Error("创建lego客户端失败")
 		return nil
 	}
 	err = l.RenewCert()
 	if err != nil {
-		log.WithField("节点", c.tag).Info("renew cert error: ", err)
+		logx.Node(c.tag).WithError(err).Error("续期证书失败")
 		return nil
 	}
 	return nil

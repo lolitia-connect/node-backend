@@ -7,9 +7,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/sirupsen/logrus"
-
 	"github.com/go-resty/resty/v2"
+	"github.com/perfect-panel/ppanel-node/common/logx"
 	"github.com/perfect-panel/ppanel-node/conf"
 )
 
@@ -44,7 +43,7 @@ func NewNodeClient(c *conf.NodeApiConfig) (*NodeClient, error) {
 	client.OnError(func(req *resty.Request, err error) {
 		var v *resty.ResponseError
 		if errors.As(err, &v) {
-			logrus.Error(v.Err)
+			logx.Component("panel").WithError(v.Err).Error("面板请求失败")
 		}
 	})
 	client.SetBaseURL(c.APIHost)
@@ -91,7 +90,7 @@ func NewServerClient(c *conf.ServerApiConfig) *ServerClient {
 	client.OnError(func(req *resty.Request, err error) {
 		var v *resty.ResponseError
 		if errors.As(err, &v) {
-			logrus.Error(v.Err)
+			logx.Component("panel").WithError(v.Err).Error("面板请求失败")
 		}
 	})
 	client.SetBaseURL(c.ApiHost)
