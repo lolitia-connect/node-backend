@@ -1,4 +1,4 @@
-package node
+package controller
 
 import (
 	"context"
@@ -19,29 +19,30 @@ import (
 )
 
 func (c *XrayController) renewCertTask(_ context.Context) error {
-	l, err := NewLego(c.info)
+	l, err := NewLego(c.Info)
 	if err != nil {
-		log.WithField("节点", c.tag).Info("new lego error: ", err)
+		log.WithField("节点", c.Tag).Info("new lego error: ", err)
 		return nil
 	}
 	err = l.RenewCert()
 	if err != nil {
-		log.WithField("节点", c.tag).Info("renew cert error: ", err)
+		log.WithField("节点", c.Tag).Info("renew cert error: ", err)
 		return nil
 	}
 	return nil
 }
 
-func (c *XrayController) requestCert() error {
-	certFile := filepath.Join("/etc/PPanel-node/", c.info.Type+strconv.Itoa(c.info.Id)+".cer")
-	keyFile := filepath.Join("/etc/PPanel-node/", c.info.Type+strconv.Itoa(c.info.Id)+".key")
-	switch c.info.Protocol.CertMode {
+// RequestCert requests or generates a TLS certificate based on CertMode.
+func (c *XrayController) RequestCert() error {
+	certFile := filepath.Join("/etc/PPanel-node/", c.Info.Type+strconv.Itoa(c.Info.Id)+".cer")
+	keyFile := filepath.Join("/etc/PPanel-node/", c.Info.Type+strconv.Itoa(c.Info.Id)+".key")
+	switch c.Info.Protocol.CertMode {
 	case "none", "", "file":
 	case "dns", "http":
 		if file.IsExist(certFile) && file.IsExist(keyFile) {
 			return nil
 		}
-		l, err := NewLego(c.info)
+		l, err := NewLego(c.Info)
 		if err != nil {
 			return fmt.Errorf("create lego object error: %s", err)
 		}
@@ -53,15 +54,12 @@ func (c *XrayController) requestCert() error {
 		if file.IsExist(certFile) && file.IsExist(keyFile) {
 			return nil
 		}
-		err := generateSelfSslCertificate(
-			c.info.Protocol.SNI,
-			certFile,
-			keyFile)
+		err := generateSelfSslCertificate(c.Info.Protocol.SNI, certFile, keyFile)
 		if err != nil {
 			return fmt.Errorf("generate self cert error: %s", err)
 		}
 	default:
-		return fmt.Errorf("unsupported certmode: %s", c.info.Protocol.CertMode)
+		return fmt.Errorf("unsupported certmode: %s", c.Info.Protocol.CertMode)
 	}
 	return nil
 }
@@ -89,22 +87,14 @@ func generateSelfSslCertificate(domain, certPath, keyPath string) error {
 	if err != nil {
 		return err
 	}
-	err = pem.Encode(f, &pem.Block{
-		Type:  "CERTIFICATE",
-		Bytes: cert,
-	})
-	if err != nil {
+	if err = pem.Encode(f, &pem.Block{Type: "CERTIFICATE", Bytes: cert}); err != nil {
 		return err
 	}
 	f, err = os.OpenFile(keyPath, os.O_CREATE|os.O_RDWR, 0644)
 	if err != nil {
 		return err
 	}
-	err = pem.Encode(f, &pem.Block{
-		Type:  "EC PRIVATE KEY",
-		Bytes: x509.MarshalPKCS1PrivateKey(key),
-	})
-	if err != nil {
+	if err = pem.Encode(f, &pem.Block{Type: "EC PRIVATE KEY", Bytes: x509.MarshalPKCS1PrivateKey(key)}); err != nil {
 		return err
 	}
 	return nil
