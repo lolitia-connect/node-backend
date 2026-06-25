@@ -21,12 +21,11 @@ on:
   release:
     types: [published]
 
-permissions:
-  contents: write
-
 jobs:
 
   build:
+    permissions:
+      contents: write
     strategy:
       matrix:
         # Include amd64 on all platforms.
