@@ -1,4 +1,4 @@
-package node
+package controller
 
 import (
 	"crypto"
@@ -34,7 +34,6 @@ type Lego struct {
 
 func NewLego(info *panel.NodeInfo) (*Lego, error) {
 	certFile := filepath.Join("/etc/PPanel-node/", info.Type+strconv.Itoa(info.Id)+".cer")
-	//keyFile := filepath.Join("/etc/PPanel-node/", info.Type+strconv.Itoa(info.Id)+".key")
 	user, err := NewLegoUser(path.Join(path.Dir(certFile),
 		"user",
 		fmt.Sprintf("user-%s.json", "ppnode@ppanel.dev")),
@@ -43,7 +42,6 @@ func NewLego(info *panel.NodeInfo) (*Lego, error) {
 		return nil, fmt.Errorf("create user error: %s", err)
 	}
 	c := lego.NewConfig(user)
-	//c.CADirURL = "http://192.168.99.100:4000/directory"
 	c.Certificate.KeyType = certcrypto.RSA2048
 	client, err := lego.NewClient(c)
 	if err != nil {
@@ -119,7 +117,6 @@ func (l *Lego) CreateCert() (err error) {
 
 func (l *Lego) RenewCert() error {
 	certFile := filepath.Join("/etc/PPanel-node/", l.info.Type+strconv.Itoa(l.info.Id)+".cer")
-	//keyFile := filepath.Join("/etc/PPanel-node/", info.Type+strconv.Itoa(info.Id)+".key")
 	file, err := os.ReadFile(certFile)
 	if err != nil {
 		return fmt.Errorf("read cert file error: %s", err)

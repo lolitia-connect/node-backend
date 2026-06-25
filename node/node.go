@@ -6,15 +6,19 @@ import (
 	"github.com/perfect-panel/ppanel-node/api/panel"
 	"github.com/perfect-panel/ppanel-node/conf"
 	vCore "github.com/perfect-panel/ppanel-node/core"
+	"github.com/perfect-panel/ppanel-node/node/controller"
+	log "github.com/sirupsen/logrus"
 )
 
 type Node struct {
-	controllers []*Controller
+	xrayNodes  []*controller.XrayController
+	mieruNodes []*controller.MieruController
 }
 
 func New(core *vCore.XrayCore, config *conf.Conf, serverconfig *panel.ServerConfigResponse) (*Node, error) {
 	node := &Node{
-		controllers: make([]*Controller, len(*serverconfig.Data.Protocols)),
+		xrayNodes:  make([]*controller.XrayController, 0),
+		mieruNodes: make([]*controller.MieruController, 0),
 	}
 	pushinterval := serverconfig.Data.PushInterval
 	if pushinterval <= 0 {
@@ -24,7 +28,7 @@ func New(core *vCore.XrayCore, config *conf.Conf, serverconfig *panel.ServerConf
 	if pullinterval <= 0 {
 		pullinterval = 60
 	}
-	for i, nodeconfig := range *serverconfig.Data.Protocols {
+	for _, nodeconfig := range *serverconfig.Data.Protocols {
 		n := &panel.NodeInfo{
 			Id:                     config.ApiConfig.ServerId,
 			Type:                   nodeconfig.Type,
@@ -42,35 +46,55 @@ func New(core *vCore.XrayCore, config *conf.Conf, serverconfig *panel.ServerConf
 		if err != nil {
 			return nil, err
 		}
-		node.controllers[i] = NewController(core, p, n)
+
+		if nodeconfig.Type == "mieru" {
+			node.mieruNodes = append(node.mieruNodes, controller.NewMieruController(config, p, n))
+		} else {
+			node.xrayNodes = append(node.xrayNodes, controller.NewXrayController(core, p, n))
+		}
 	}
 
 	return node, nil
 }
 
 func (n *Node) Start() error {
-	for i := range n.controllers {
-		if !n.controllers[i].info.Protocol.Enable {
+	for i := range n.xrayNodes {
+		if !n.xrayNodes[i].Info.Protocol.Enable {
 			continue
 		}
-		err := n.controllers[i].Start()
+		err := n.xrayNodes[i].Start()
 		if err != nil {
 			return fmt.Errorf("启动节点 [%s-%s-%d] 失败: %s",
-				n.controllers[i].apiClient.APIHost,
-				n.controllers[i].info.Type,
-				n.controllers[i].info.Id,
+				n.xrayNodes[i].ApiClient.APIHost,
+				n.xrayNodes[i].Info.Type,
+				n.xrayNodes[i].Info.Id,
 				err)
+		}
+	}
+	for i := range n.mieruNodes {
+		if !n.mieruNodes[i].Info.Protocol.Enable {
+			continue
+		}
+		if err := n.mieruNodes[i].Start(); err != nil {
+			return fmt.Errorf("启动 mieru 节点 [%s] 失败: %w",
+				n.mieruNodes[i].Tag, err)
 		}
 	}
 	return nil
 }
 
 func (n *Node) Close() {
-	for _, c := range n.controllers {
-		err := c.Close()
-		if err != nil {
+	for _, c := range n.xrayNodes {
+		if err := c.Close(); err != nil {
 			panic(err)
 		}
 	}
-	n.controllers = nil
+	n.xrayNodes = nil
+
+	for _, m := range n.mieruNodes {
+		if err := m.Close(); err != nil {
+			log.WithError(err).Warn("close mieru node error")
+		}
+	}
+	n.mieruNodes = nil
 }

@@ -18,7 +18,7 @@ import (
 	log "github.com/sirupsen/logrus"
 )
 
-func (c *Controller) renewCertTask(_ context.Context) error {
+func (c *XrayController) renewCertTask(_ context.Context) error {
 	l, err := NewLego(c.info)
 	if err != nil {
 		log.WithField("节点", c.tag).Info("new lego error: ", err)
@@ -32,7 +32,7 @@ func (c *Controller) renewCertTask(_ context.Context) error {
 	return nil
 }
 
-func (c *Controller) requestCert() error {
+func (c *XrayController) requestCert() error {
 	certFile := filepath.Join("/etc/PPanel-node/", c.info.Type+strconv.Itoa(c.info.Id)+".cer")
 	keyFile := filepath.Join("/etc/PPanel-node/", c.info.Type+strconv.Itoa(c.info.Id)+".key")
 	switch c.info.Protocol.CertMode {
