@@ -268,13 +268,13 @@ install_ppnode() {
     cd /usr/local/PPanel-node/
 
     if  [[ -z "$version_param" ]] ; then
-        last_version=$(curl -Ls "https://api.github.com/repos/perfect-panel/PPanel-node/releases/latest" | grep '"tag_name":' | sed -E 's/.*"([^"]+)".*/\1/')
+        last_version=$(curl -Ls "https://api.github.com/repos/lolitia-connect/node-backend/releases/latest" | grep '"tag_name":' | sed -E 's/.*"([^"]+)".*/\1/')
         if [[ ! -n "$last_version" ]]; then
             echo -e "${red}检测 PPanel-node 版本失败，可能是超出 Github API 限制，请稍后再试，或手动指定 PPanel-node 版本安装${plain}"
             exit 1
         fi
         echo -e "${green}检测到最新版本：${last_version}，开始安装...${plain}"
-        url="https://github.com/perfect-panel/PPanel-node/releases/download/${last_version}/ppanel-node-linux-${arch}.zip"
+        url="https://github.com/lolitia-connect/node-backend/releases/download/${last_version}/ppanel-node-linux-${arch}.zip"
         curl -sL "$url" | pv -s 30M -W -N "下载进度" > /usr/local/PPanel-node/ppanel-node-linux.zip
         if [[ $? -ne 0 ]]; then
             echo -e "${red}下载 PPanel-node 失败，请确保你的服务器能够下载 Github 的文件${plain}"
@@ -282,7 +282,7 @@ install_ppnode() {
         fi
     else
     last_version=$version_param
-        url="https://github.com/perfect-panel/PPanel-node/releases/download/${last_version}/ppanel-node-linux-${arch}.zip"
+        url="https://github.com/lolitia-connect/node-backend/releases/download/${last_version}/ppanel-node-linux-${arch}.zip"
         curl -sL "$url" | pv -s 30M -W -N "下载进度" > /usr/local/PPanel-node/ppanel-node-linux.zip
         if [[ $? -ne 0 ]]; then
             echo -e "${red}下载 PPanel-node $1 失败，请确保此版本存在${plain}"
@@ -376,7 +376,7 @@ EOF
     fi
 
 
-    curl -o /usr/bin/ppnode -Ls https://raw.githubusercontent.com/perfect-panel/ppanel-node/master/scripts/ppnode.sh
+    curl -o /usr/bin/ppnode -Ls https://raw.githubusercontent.com/lolitia-connect/node-backend/master/scripts/ppnode.sh
     chmod +x /usr/bin/ppnode
 
     cd $cur_dir
