@@ -227,7 +227,7 @@ func (c *MieruController) reportUserTrafficTask(ctx context.Context) error {
 		threshold = int64(c.Info.TrafficReportThreshold)
 	}
 
-	// Read per-user traffic from mieru metrics
+	// Read per-user traffic from mieru metrics and reset counters
 	for _, u := range c.userList {
 		userMetrics := metrics.GetMetricsForUser(u.Uuid)
 		if userMetrics == nil {
@@ -243,6 +243,13 @@ func (c *MieruController) reportUserTrafficTask(ctx context.Context) error {
 			}
 		}
 		if up+down > threshold {
+			// Reset counters after reading, so next report only contains new traffic
+			for _, m := range userMetrics {
+				switch m.Name() {
+				case metrics.UserMetricUploadBytes, metrics.UserMetricDownloadBytes:
+					m.Store(0)
+				}
+			}
 			userTraffic = append(userTraffic, panel.UserTraffic{
 				UID:      u.Id,
 				Upload:   up,
