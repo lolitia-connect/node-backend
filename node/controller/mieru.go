@@ -22,6 +22,14 @@ import (
 	log "github.com/sirupsen/logrus"
 )
 
+// userTrafficSnapshot stores the last reported cumulative upload/download values.
+// Mieru counters (COUNTER_TIME_SERIES) are monotonically increasing and
+// don't support Store(0), so we must compute deltas ourselves.
+type userTrafficSnapshot struct {
+	upload   int64
+	download int64
+}
+
 // MieruController manages a mieru proxy node, parallel to XrayController.
 type MieruController struct {
 	mux       *protocol.Mux
@@ -35,6 +43,10 @@ type MieruController struct {
 	UserListMonitorPeriodic *task.Task
 	UserReportPeriodic      *task.Task
 
+	// lastTraffic tracks the last reported cumulative traffic per user ID.
+	// Used to compute delta since mieru Counter doesn't support Store(0).
+	lastTraffic map[int]userTrafficSnapshot
+
 	mu      sync.Mutex
 	running bool
 }
@@ -43,10 +55,11 @@ type MieruController struct {
 func NewMieruController(config *conf.Conf, apiClient *panel.ClientV1, info *panel.NodeInfo) *MieruController {
 	tag := fmt.Sprintf("[%s]-%s:%d", apiClient.APIHost, info.Type, info.Id)
 	return &MieruController{
-		Tag:       tag,
-		Info:      info,
-		Config:    config,
-		ApiClient: apiClient,
+		Tag:         tag,
+		Info:        info,
+		Config:      config,
+		ApiClient:   apiClient,
+		lastTraffic: make(map[int]userTrafficSnapshot),
 	}
 }
 
@@ -227,7 +240,9 @@ func (c *MieruController) reportUserTrafficTask(ctx context.Context) error {
 		threshold = int64(c.Info.TrafficReportThreshold)
 	}
 
-	// Read per-user traffic from mieru metrics and reset counters
+	// Read per-user traffic from mieru metrics and compute delta since last report.
+	// Mieru Counter is monotonically increasing (Store panics), so we track
+	// the last reported cumulative value and report the difference.
 	for _, u := range c.userList {
 		userMetrics := metrics.GetMetricsForUser(u.Uuid)
 		if userMetrics == nil {
@@ -242,18 +257,20 @@ func (c *MieruController) reportUserTrafficTask(ctx context.Context) error {
 				down = m.Load()
 			}
 		}
-		if up+down > threshold {
-			// Reset counters after reading, so next report only contains new traffic
-			for _, m := range userMetrics {
-				switch m.Name() {
-				case metrics.UserMetricUploadBytes, metrics.UserMetricDownloadBytes:
-					m.Store(0)
-				}
-			}
+
+		// Compute delta since last report
+		last := c.lastTraffic[u.Id]
+		deltaUp := up - last.upload
+		deltaDown := down - last.download
+
+		// Update the snapshot regardless of threshold
+		c.lastTraffic[u.Id] = userTrafficSnapshot{upload: up, download: down}
+
+		if deltaUp+deltaDown > threshold {
 			userTraffic = append(userTraffic, panel.UserTraffic{
 				UID:      u.Id,
-				Upload:   up,
-				Download: down,
+				Upload:   deltaUp,
+				Download: deltaDown,
 			})
 		}
 	}
