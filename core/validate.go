@@ -65,8 +65,8 @@ func validateStreamProtocol(protocol panel.Protocol) error {
 	switch protocol.Security {
 	case "", "none":
 	case "tls":
-		if protocol.CertMode != "none" && protocol.CertMode != "" && strings.TrimSpace(protocol.SNI) == "" {
-			return fmt.Errorf("sni is required for tls")
+		if err := validateTLSConfig(protocol); err != nil {
+			return err
 		}
 	case "reality":
 		if strings.TrimSpace(protocol.RealityPrivateKey) == "" {
@@ -78,8 +78,8 @@ func validateStreamProtocol(protocol panel.Protocol) error {
 		if strings.TrimSpace(protocol.SNI) == "" {
 			return fmt.Errorf("sni is required for reality")
 		}
-		if strings.TrimSpace(protocol.RealityServerAddr) == "" && protocol.RealityServerPort <= 0 {
-			return fmt.Errorf("reality_server_addr or reality_server_port is required")
+		if protocol.RealityServerPort <= 0 || protocol.RealityServerPort > 65535 {
+			return fmt.Errorf("reality_server_port must be between 1 and 65535")
 		}
 	default:
 		return fmt.Errorf("unsupported security %q", protocol.Security)
@@ -89,6 +89,20 @@ func validateStreamProtocol(protocol panel.Protocol) error {
 		return validateVlessEncryption(protocol)
 	}
 	return nil
+}
+
+func validateTLSConfig(protocol panel.Protocol) error {
+	switch strings.TrimSpace(protocol.CertMode) {
+	case "", "none", "file":
+		return nil
+	case "self", "dns", "http":
+		if strings.TrimSpace(protocol.SNI) == "" {
+			return fmt.Errorf("sni is required for tls cert_mode %q", protocol.CertMode)
+		}
+		return nil
+	default:
+		return fmt.Errorf("unsupported cert_mode %q", protocol.CertMode)
+	}
 }
 
 func validateVlessEncryption(protocol panel.Protocol) error {

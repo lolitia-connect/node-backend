@@ -55,7 +55,9 @@ func serverHandle(_ *cobra.Command, _ []string) {
 	if err != nil {
 		logx.Component("server").WithError(err).Error("初始化日志失败，使用stdout替代")
 	}
-	defer logHandle.Close()
+	defer func() {
+		_ = logHandle.Close()
+	}()
 	// Enable pprof if configured
 	if c.PprofPort != 0 {
 		go func() {
@@ -166,6 +168,20 @@ func reload(config string, nodes **node.Node, xcore **core.XrayCore, logHandle *
 		_ = newCore.Close()
 		return logHandle, err
 	}
+
+	oldNodes := *nodes
+	oldCore := *xcore
+	if oldNodes != nil {
+		oldNodes.Close()
+	}
+	if oldCore != nil {
+		if err := oldCore.Close(); err != nil {
+			logx.Component("server").WithError(err).Error("关闭旧Xray核心失败")
+		}
+	}
+	*nodes = nil
+	*xcore = nil
+
 	if err := newNodes.Start(); err != nil {
 		newNodes.Close()
 		_ = newCore.Close()
@@ -173,8 +189,6 @@ func reload(config string, nodes **node.Node, xcore **core.XrayCore, logHandle *
 	}
 	logx.Component("server").Info("新节点启动成功")
 
-	oldNodes := *nodes
-	oldCore := *xcore
 	*nodes = newNodes
 	*xcore = newCore
 	logx.Component("server").Info("实例切换成功")
@@ -189,14 +203,6 @@ func reload(config string, nodes **node.Node, xcore **core.XrayCore, logHandle *
 			_ = logHandle.Close()
 		}
 		newLogHandle = h
-	}
-	if oldNodes != nil {
-		oldNodes.Close()
-	}
-	if oldCore != nil {
-		if err := oldCore.Close(); err != nil {
-			logx.Component("server").WithError(err).Error("关闭旧Xray核心失败")
-		}
 	}
 	logx.Component("server").WithField("server_total", serverconfig.Data.Total).Info("节点重载成功")
 	runtime.GC()

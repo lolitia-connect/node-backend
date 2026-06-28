@@ -40,7 +40,7 @@ func buildVlessDecryption(protocol *panel.Protocol) (string, error) {
 		parts := []string{
 			"mlkem768x25519plus",
 			protocol.EncryptionMode,
-			protocol.EncryptionTicket,
+			normalizeVlessTicket(protocol.EncryptionTicket),
 		}
 		if protocol.EncryptionServerPadding != "" {
 			parts = append(parts, strings.Split(protocol.EncryptionServerPadding, ".")...)
@@ -50,4 +50,16 @@ func buildVlessDecryption(protocol *panel.Protocol) (string, error) {
 	default:
 		return "", fmt.Errorf("vless decryption method %s is not support", protocol.Encryption)
 	}
+}
+
+func normalizeVlessTicket(ticket string) string {
+	ticket = strings.TrimSpace(ticket)
+	if ticket == "" {
+		return ""
+	}
+	last := ticket[len(ticket)-1]
+	if last >= '0' && last <= '9' {
+		return ticket + "s"
+	}
+	return ticket
 }

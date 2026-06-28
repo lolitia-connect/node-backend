@@ -27,6 +27,22 @@ func TestBuildVlessDecryptionUsesServerFields(t *testing.T) {
 	}
 }
 
+func TestBuildVlessDecryptionAddsSecondsToNumericTicket(t *testing.T) {
+	got, err := buildVlessDecryption(&panel.Protocol{
+		Encryption:           "mlkem768x25519plus",
+		EncryptionMode:       "native",
+		EncryptionTicket:     "600",
+		EncryptionPrivateKey: "private-key",
+	})
+	if err != nil {
+		t.Fatalf("buildVlessDecryption() error = %v", err)
+	}
+	want := "mlkem768x25519plus.native.600s.private-key"
+	if got != want {
+		t.Fatalf("buildVlessDecryption() = %s, want %s", got, want)
+	}
+}
+
 func TestBuildVLessUsesEncryptionTicketInDecryption(t *testing.T) {
 	inbound := &coreConf.InboundDetourConfig{}
 	err := buildVLess(&panel.NodeInfo{
