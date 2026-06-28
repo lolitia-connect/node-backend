@@ -144,12 +144,7 @@ func (c *NodeClient) ReportUserTraffic(ctx context.Context, userTraffic *[]UserT
 	if err != nil {
 		return fmt.Errorf("访问 %s 失败: %s", path.Join(c.APIHost+p), err)
 	}
-	if r.StatusCode() >= 400 {
-		body := r.Body()
-		return fmt.Errorf("访问 %s 失败: %s", path.Join(c.APIHost+p), string(body))
-	}
-
-	return nil
+	return checkPanelResponse(r, path.Join(c.APIHost+p))
 }
 
 func (c *NodeClient) ReportNodeOnlineUsers(ctx context.Context, data *[]OnlineUser) error {
@@ -165,10 +160,5 @@ func (c *NodeClient) ReportNodeOnlineUsers(ctx context.Context, data *[]OnlineUs
 	if err != nil {
 		return fmt.Errorf("访问 %s 失败: %s", path.Join(c.APIHost+p), err)
 	}
-	if r.StatusCode() >= 400 {
-		body := r.Body()
-		return fmt.Errorf("访问 %s 失败: %s", path.Join(c.APIHost+p), string(body))
-	}
-
-	return nil
+	return checkPanelResponse(r, path.Join(c.APIHost+p))
 }

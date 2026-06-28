@@ -44,8 +44,9 @@ func buildShadowsocks(nodeInfo *panel.NodeInfo, inbound *coreConf.InboundDetourC
 		}
 		t := coreConf.TransportProtocol("tcp")
 		inbound.StreamSetting = &coreConf.StreamConfig{Network: &t}
-		inbound.StreamSetting.TCPSettings = &coreConf.TCPConfig{}
-		//inbound.StreamSetting.TCPSettings.AcceptProxyProtocol = false
+		inbound.StreamSetting.TCPSettings = &coreConf.TCPConfig{
+			AcceptProxyProtocol: nodeInfo.Protocol.AcceptProxyProtocol,
+		}
 
 		httpHeader := map[string]interface{}{
 			"type":    "http",

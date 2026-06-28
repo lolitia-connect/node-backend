@@ -115,11 +115,14 @@ func buildTransportSetting(nodeInfo *panel.NodeInfo) (*coreConf.StreamConfig, er
 	stream := &coreConf.StreamConfig{Network: &t}
 	switch nodeInfo.Protocol.Transport {
 	case "tcp":
-		stream.TCPSettings = &coreConf.TCPConfig{}
+		stream.TCPSettings = &coreConf.TCPConfig{
+			AcceptProxyProtocol: nodeInfo.Protocol.AcceptProxyProtocol,
+		}
 	case "ws", "websocket":
 		stream.WSSettings = &coreConf.WebSocketConfig{
-			Host: nodeInfo.Protocol.Host,
-			Path: nodeInfo.Protocol.Path,
+			Host:                nodeInfo.Protocol.Host,
+			Path:                nodeInfo.Protocol.Path,
+			AcceptProxyProtocol: nodeInfo.Protocol.AcceptProxyProtocol,
 		}
 	case "grpc":
 		stream.GRPCSettings = &coreConf.GRPCConfig{
@@ -127,14 +130,18 @@ func buildTransportSetting(nodeInfo *panel.NodeInfo) (*coreConf.StreamConfig, er
 		}
 	case "httpupgrade":
 		stream.HTTPUPGRADESettings = &coreConf.HttpUpgradeConfig{
-			Host: nodeInfo.Protocol.Host,
-			Path: nodeInfo.Protocol.Path,
+			Host:                nodeInfo.Protocol.Host,
+			Path:                nodeInfo.Protocol.Path,
+			AcceptProxyProtocol: nodeInfo.Protocol.AcceptProxyProtocol,
 		}
 	case "splithttp", "xhttp":
 		stream.SplitHTTPSettings = &coreConf.SplitHTTPConfig{
 			Host: nodeInfo.Protocol.Host,
 			Path: nodeInfo.Protocol.Path,
 			Mode: nodeInfo.Protocol.XHTTPMode,
+		}
+		if nodeInfo.Protocol.XHTTPExtra != "" {
+			stream.SplitHTTPSettings.Extra = json.RawMessage(nodeInfo.Protocol.XHTTPExtra)
 		}
 	default:
 		return nil, errors.New("the network type is not vail")
