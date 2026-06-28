@@ -37,8 +37,9 @@ func (c *NodeClient) ReportNodeStatus(nodeStatus *NodeStatus) (err error) {
 		Disk:      nodeStatus.Disk,
 		UpdatedAt: time.Now().UnixMilli(),
 	}
-	if _, err = c.Client.R().SetBody(status).ForceContentType("application/json").Post(p); err != nil {
+	r, err := c.Client.R().SetBody(status).ForceContentType("application/json").Post(p)
+	if err != nil {
 		return fmt.Errorf("访问 %s 失败: %v", path.Join(c.APIHost+p), err.Error())
 	}
-	return nil
+	return checkPanelResponse(r, path.Join(c.APIHost+p))
 }
