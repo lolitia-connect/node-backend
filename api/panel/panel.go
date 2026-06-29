@@ -7,13 +7,12 @@ import (
 	"strings"
 	"time"
 
-	"github.com/sirupsen/logrus"
-
 	"github.com/go-resty/resty/v2"
+	"github.com/perfect-panel/ppanel-node/common/logx"
 	"github.com/perfect-panel/ppanel-node/conf"
 )
 
-type ClientV1 struct {
+type NodeClient struct {
 	Client    *resty.Client
 	APIHost   string
 	SecretKey string
@@ -24,7 +23,7 @@ type ClientV1 struct {
 	AliveMap  *AliveMap
 }
 
-type ClientV2 struct {
+type ServerClient struct {
 	Client           *resty.Client
 	APIHost          string
 	SecretKey        string
@@ -33,7 +32,7 @@ type ClientV2 struct {
 	responseBodyHash string
 }
 
-func NewClientV1(c *conf.NodeApiConfig) (*ClientV1, error) {
+func NewNodeClient(c *conf.NodeApiConfig) (*NodeClient, error) {
 	client := resty.New()
 	client.SetRetryCount(0)
 	if c.Timeout > 0 {
@@ -44,7 +43,7 @@ func NewClientV1(c *conf.NodeApiConfig) (*ClientV1, error) {
 	client.OnError(func(req *resty.Request, err error) {
 		var v *resty.ResponseError
 		if errors.As(err, &v) {
-			logrus.Error(v.Err)
+			logx.Component("panel").WithError(v.Err).Error("面板请求失败")
 		}
 	})
 	client.SetBaseURL(c.APIHost)
@@ -70,7 +69,7 @@ func NewClientV1(c *conf.NodeApiConfig) (*ClientV1, error) {
 		"server_id":  strconv.Itoa(c.NodeID),
 		"secret_key": c.SecretKey,
 	})
-	return &ClientV1{
+	return &NodeClient{
 		Client:    client,
 		SecretKey: c.SecretKey,
 		APIHost:   c.APIHost,
@@ -81,7 +80,7 @@ func NewClientV1(c *conf.NodeApiConfig) (*ClientV1, error) {
 	}, nil
 }
 
-func NewClientV2(c *conf.ServerApiConfig) *ClientV2 {
+func NewServerClient(c *conf.ServerApiConfig) *ServerClient {
 	client := resty.New()
 	client.SetRetryCount(0)
 	if c.Timeout > 0 {
@@ -92,14 +91,14 @@ func NewClientV2(c *conf.ServerApiConfig) *ClientV2 {
 	client.OnError(func(req *resty.Request, err error) {
 		var v *resty.ResponseError
 		if errors.As(err, &v) {
-			logrus.Error(v.Err)
+			logx.Component("panel").WithError(v.Err).Error("面板请求失败")
 		}
 	})
 	client.SetBaseURL(c.ApiHost)
 	client.SetQueryParams(map[string]string{
 		"secret_key": c.SecretKey,
 	})
-	return &ClientV2{
+	return &ServerClient{
 		Client:    client,
 		APIHost:   c.ApiHost,
 		SecretKey: c.SecretKey,
