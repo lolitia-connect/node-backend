@@ -30,7 +30,7 @@ type userTrafficSnapshot struct {
 	download int64
 }
 
-// MieruController manages a mieru proxy node, parallel to Controller (xray).
+// MieruController manages a mieru proxy node, parallel to XrayController.
 type MieruController struct {
 	mux       *protocol.Mux
 	socks5Srv *socks5.Server
