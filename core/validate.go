@@ -45,7 +45,7 @@ func validateProtocol(protocol panel.Protocol) error {
 		if strings.TrimSpace(protocol.Cipher) == "" {
 			return fmt.Errorf("cipher is required")
 		}
-	case "tuic", "hysteria", "hysteria2", "anytls":
+	case "tuic", "hysteria", "hysteria2", "anytls", "mieru":
 	default:
 		return fmt.Errorf("unsupported protocol type")
 	}
