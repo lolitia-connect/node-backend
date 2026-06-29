@@ -11,11 +11,15 @@ import (
 	"github.com/perfect-panel/ppanel-node/common/format"
 )
 
-var limitLock sync.RWMutex
-var limiter map[string]*Limiter
+type Manager struct {
+	lock     sync.RWMutex
+	limiters map[string]*Limiter
+}
 
-func Init() {
-	limiter = map[string]*Limiter{}
+func NewManager() *Manager {
+	return &Manager{
+		limiters: make(map[string]*Limiter),
+	}
 }
 
 type Limiter struct {
@@ -37,7 +41,7 @@ type UserLimitInfo struct {
 	OverLimit         bool
 }
 
-func AddLimiter(tag string, users []panel.UserInfo, aliveList map[int]int) *Limiter {
+func (m *Manager) Add(tag string, users []panel.UserInfo, aliveList map[int]int) *Limiter {
 	info := &Limiter{
 		UserOnlineIP:  new(sync.Map),
 		UserLimitInfo: new(sync.Map),
@@ -60,26 +64,26 @@ func AddLimiter(tag string, users []panel.UserInfo, aliveList map[int]int) *Limi
 		info.UserLimitInfo.Store(format.UserTag(tag, users[i].Uuid), userLimit)
 	}
 	info.UUIDtoUID = uuidmap
-	limitLock.Lock()
-	limiter[tag] = info
-	limitLock.Unlock()
+	m.lock.Lock()
+	m.limiters[tag] = info
+	m.lock.Unlock()
 	return info
 }
 
-func GetLimiter(tag string) (info *Limiter, err error) {
-	limitLock.RLock()
-	info, ok := limiter[tag]
-	limitLock.RUnlock()
+func (m *Manager) Get(tag string) (info *Limiter, err error) {
+	m.lock.RLock()
+	info, ok := m.limiters[tag]
+	m.lock.RUnlock()
 	if !ok {
 		return nil, errors.New("not found")
 	}
 	return info, nil
 }
 
-func DeleteLimiter(tag string) {
-	limitLock.Lock()
-	delete(limiter, tag)
-	limitLock.Unlock()
+func (m *Manager) Delete(tag string) {
+	m.lock.Lock()
+	delete(m.limiters, tag)
+	m.lock.Unlock()
 }
 
 func (l *Limiter) UpdateUser(tag string, added []panel.UserInfo, deleted []panel.UserInfo) {

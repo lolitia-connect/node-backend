@@ -1,4 +1,4 @@
-package controller
+package node
 
 import (
 	"context"
@@ -15,34 +15,33 @@ import (
 	"time"
 
 	"github.com/perfect-panel/ppanel-node/common/file"
-	log "github.com/sirupsen/logrus"
+	"github.com/perfect-panel/ppanel-node/common/logx"
 )
 
-func (c *XrayController) renewCertTask(_ context.Context) error {
-	l, err := NewLego(c.Info)
+func (c *Controller) renewCertTask(_ context.Context) error {
+	l, err := NewLego(c.info)
 	if err != nil {
-		log.WithField("节点", c.Tag).Info("new lego error: ", err)
+		logx.Node(c.tag).WithError(err).Error("创建lego客户端失败")
 		return nil
 	}
 	err = l.RenewCert()
 	if err != nil {
-		log.WithField("节点", c.Tag).Info("renew cert error: ", err)
+		logx.Node(c.tag).WithError(err).Error("续期证书失败")
 		return nil
 	}
 	return nil
 }
 
-// RequestCert requests or generates a TLS certificate based on CertMode.
-func (c *XrayController) RequestCert() error {
-	certFile := filepath.Join("/etc/PPanel-node/", c.Info.Type+strconv.Itoa(c.Info.Id)+".cer")
-	keyFile := filepath.Join("/etc/PPanel-node/", c.Info.Type+strconv.Itoa(c.Info.Id)+".key")
-	switch c.Info.Protocol.CertMode {
+func (c *Controller) requestCert() error {
+	certFile := filepath.Join("/etc/PPanel-node/", c.info.Type+strconv.Itoa(c.info.Id)+".cer")
+	keyFile := filepath.Join("/etc/PPanel-node/", c.info.Type+strconv.Itoa(c.info.Id)+".key")
+	switch c.info.Protocol.CertMode {
 	case "none", "", "file":
 	case "dns", "http":
 		if file.IsExist(certFile) && file.IsExist(keyFile) {
 			return nil
 		}
-		l, err := NewLego(c.Info)
+		l, err := NewLego(c.info)
 		if err != nil {
 			return fmt.Errorf("create lego object error: %s", err)
 		}
@@ -54,12 +53,15 @@ func (c *XrayController) RequestCert() error {
 		if file.IsExist(certFile) && file.IsExist(keyFile) {
 			return nil
 		}
-		err := generateSelfSslCertificate(c.Info.Protocol.SNI, certFile, keyFile)
+		err := generateSelfSslCertificate(
+			c.info.Protocol.SNI,
+			certFile,
+			keyFile)
 		if err != nil {
 			return fmt.Errorf("generate self cert error: %s", err)
 		}
 	default:
-		return fmt.Errorf("unsupported certmode: %s", c.Info.Protocol.CertMode)
+		return fmt.Errorf("unsupported certmode: %s", c.info.Protocol.CertMode)
 	}
 	return nil
 }
@@ -87,14 +89,22 @@ func generateSelfSslCertificate(domain, certPath, keyPath string) error {
 	if err != nil {
 		return err
 	}
-	if err = pem.Encode(f, &pem.Block{Type: "CERTIFICATE", Bytes: cert}); err != nil {
+	err = pem.Encode(f, &pem.Block{
+		Type:  "CERTIFICATE",
+		Bytes: cert,
+	})
+	if err != nil {
 		return err
 	}
 	f, err = os.OpenFile(keyPath, os.O_CREATE|os.O_RDWR, 0644)
 	if err != nil {
 		return err
 	}
-	if err = pem.Encode(f, &pem.Block{Type: "EC PRIVATE KEY", Bytes: x509.MarshalPKCS1PrivateKey(key)}); err != nil {
+	err = pem.Encode(f, &pem.Block{
+		Type:  "EC PRIVATE KEY",
+		Bytes: x509.MarshalPKCS1PrivateKey(key),
+	})
+	if err != nil {
 		return err
 	}
 	return nil

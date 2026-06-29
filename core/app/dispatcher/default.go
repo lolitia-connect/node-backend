@@ -100,13 +100,14 @@ func (r *cachedReader) Interrupt() {
 
 // DefaultDispatcher is a default implementation of Dispatcher.
 type DefaultDispatcher struct {
-	ohm          outbound.Manager
-	router       routing.Router
-	policy       policy.Manager
-	stats        stats.Manager
-	fdns         dns.FakeDNSEngine
-	Counter      sync.Map
-	LinkManagers sync.Map // map[string]*LinkManager
+	ohm            outbound.Manager
+	router         routing.Router
+	policy         policy.Manager
+	stats          stats.Manager
+	fdns           dns.FakeDNSEngine
+	Counter        sync.Map
+	LinkManagers   sync.Map // map[string]*LinkManager
+	LimiterManager *limiter.Manager
 }
 
 func init() {
@@ -170,7 +171,7 @@ func (d *DefaultDispatcher) getLink(ctx context.Context, network net.Network) (*
 	var limit *limiter.Limiter
 	var err error
 	if user != nil && len(user.Email) > 0 {
-		limit, err = limiter.GetLimiter(sessionInbound.Tag)
+		limit, err = d.LimiterManager.Get(sessionInbound.Tag)
 		if err != nil {
 			errors.LogInfo(ctx, "get limiter ", sessionInbound.Tag, " error: ", err)
 			common.Close(outboundLink.Writer)
@@ -356,7 +357,7 @@ func (d *DefaultDispatcher) DispatchLink(ctx context.Context, destination net.De
 	var limit *limiter.Limiter
 	var err error
 	if user != nil && len(user.Email) > 0 {
-		limit, err = limiter.GetLimiter(sessionInbound.Tag)
+		limit, err = d.LimiterManager.Get(sessionInbound.Tag)
 		if err != nil {
 			errors.LogInfo(ctx, "get limiter ", sessionInbound.Tag, " error: ", err)
 			common.Close(outbound.Writer)
