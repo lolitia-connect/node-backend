@@ -12,7 +12,7 @@ import (
 	vCore "github.com/perfect-panel/ppanel-node/core"
 )
 
-func (c *Controller) startTasks(node *panel.NodeInfo) {
+func (c *XrayController) startTasks(node *panel.NodeInfo) {
 	// fetch user list task
 	c.userListMonitorPeriodic = &task.Task{
 		Name:     "userListMonitor",
@@ -66,7 +66,7 @@ func (c *Controller) startTasks(node *panel.NodeInfo) {
 	}
 }
 
-func (c *Controller) reloadTask() {
+func (c *XrayController) reloadTask() {
 	c.userListMonitorPeriodic.Close()
 	c.userReportPeriodic.Close()
 	if c.renewCertPeriodic != nil {
@@ -75,7 +75,7 @@ func (c *Controller) reloadTask() {
 	c.startTasks(c.info)
 }
 
-func (c *Controller) userListMonitor(ctx context.Context) (err error) {
+func (c *XrayController) userListMonitor(ctx context.Context) (err error) {
 	// get user info
 	newU, err := c.apiClient.GetUserList(ctx)
 	if err != nil {
@@ -136,7 +136,7 @@ func (c *Controller) userListMonitor(ctx context.Context) (err error) {
 	return nil
 }
 
-func (c *Controller) reportUserTrafficTask(ctx context.Context) (err error) {
+func (c *XrayController) reportUserTrafficTask(ctx context.Context) (err error) {
 	var reportmin = 0
 	if c.info.TrafficReportThreshold > 0 {
 		reportmin = c.info.TrafficReportThreshold

@@ -12,7 +12,7 @@ import (
 	"github.com/perfect-panel/ppanel-node/limiter"
 )
 
-type Controller struct {
+type XrayController struct {
 	server                  *vCore.XrayCore
 	apiClient               *panel.NodeClient
 	tag                     string
@@ -26,9 +26,9 @@ type Controller struct {
 	onlineIpReportPeriodic  *task.Task
 }
 
-// NewController return a Node controller with default parameters.
-func NewController(core *vCore.XrayCore, api *panel.NodeClient, info *panel.NodeInfo) *Controller {
-	controller := &Controller{
+// NewXrayController return a Node controller with default parameters.
+func NewXrayController(core *vCore.XrayCore, api *panel.NodeClient, info *panel.NodeInfo) *XrayController {
+	controller := &XrayController{
 		server:    core,
 		apiClient: api,
 		info:      info,
@@ -37,7 +37,7 @@ func NewController(core *vCore.XrayCore, api *panel.NodeClient, info *panel.Node
 }
 
 // Start implement the Start() function of the service interface
-func (c *Controller) Start() error {
+func (c *XrayController) Start() error {
 	var err error
 	// Update user
 	c.userList, err = c.apiClient.GetUserList(context.Background())
@@ -82,7 +82,7 @@ func (c *Controller) Start() error {
 }
 
 // Close implement the Close() function of the service interface
-func (c *Controller) Close() error {
+func (c *XrayController) Close() error {
 	if c == nil {
 		return nil
 	}
@@ -116,6 +116,6 @@ func (c *Controller) Close() error {
 	return nil
 }
 
-func (c *Controller) buildNodeTag(node *panel.NodeInfo) string {
+func (c *XrayController) buildNodeTag(node *panel.NodeInfo) string {
 	return fmt.Sprintf("[%s]-%s:%d", c.apiClient.APIHost, node.Type, node.Id)
 }

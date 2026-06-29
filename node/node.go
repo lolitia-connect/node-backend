@@ -10,14 +10,14 @@ import (
 )
 
 type Node struct {
-	controllers  []*Controller
-	mieruNodes   []*MieruController
+	xrayNodes  []*XrayController
+	mieruNodes []*MieruController
 }
 
 func New(core *vCore.XrayCore, config *conf.Conf, serverconfig *panel.ServerConfigResponse) (*Node, error) {
 	node := &Node{
-		controllers: make([]*Controller, 0),
-		mieruNodes:  make([]*MieruController, 0),
+		xrayNodes:  make([]*XrayController, 0),
+		mieruNodes: make([]*MieruController, 0),
 	}
 	pushinterval := serverconfig.Data.PushInterval
 	if pushinterval <= 0 {
@@ -48,7 +48,7 @@ func New(core *vCore.XrayCore, config *conf.Conf, serverconfig *panel.ServerConf
 		if nodeconfig.Type == "mieru" {
 			node.mieruNodes = append(node.mieruNodes, NewMieruController(config, p, n))
 		} else {
-			node.controllers = append(node.controllers, NewController(core, p, n))
+			node.xrayNodes = append(node.xrayNodes, NewXrayController(core, p, n))
 		}
 	}
 
@@ -56,16 +56,16 @@ func New(core *vCore.XrayCore, config *conf.Conf, serverconfig *panel.ServerConf
 }
 
 func (n *Node) Start() error {
-	for i := range n.controllers {
-		if !n.controllers[i].info.Protocol.Enable {
+	for i := range n.xrayNodes {
+		if !n.xrayNodes[i].info.Protocol.Enable {
 			continue
 		}
-		err := n.controllers[i].Start()
+		err := n.xrayNodes[i].Start()
 		if err != nil {
 			return fmt.Errorf("启动节点 [%s-%s-%d] 失败: %s",
-				n.controllers[i].apiClient.APIHost,
-				n.controllers[i].info.Type,
-				n.controllers[i].info.Id,
+				n.xrayNodes[i].apiClient.APIHost,
+				n.xrayNodes[i].info.Type,
+				n.xrayNodes[i].info.Id,
 				err)
 		}
 	}
@@ -85,7 +85,7 @@ func (n *Node) Close() {
 	if n == nil {
 		return
 	}
-	for _, c := range n.controllers {
+	for _, c := range n.xrayNodes {
 		if c == nil {
 			continue
 		}
@@ -93,7 +93,7 @@ func (n *Node) Close() {
 			logx.Node(c.tag).WithError(err).Error("关闭节点控制器失败")
 		}
 	}
-	n.controllers = nil
+	n.xrayNodes = nil
 
 	for _, m := range n.mieruNodes {
 		if m == nil {

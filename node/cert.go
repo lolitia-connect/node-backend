@@ -18,7 +18,7 @@ import (
 	"github.com/perfect-panel/ppanel-node/common/logx"
 )
 
-func (c *Controller) renewCertTask(_ context.Context) error {
+func (c *XrayController) renewCertTask(_ context.Context) error {
 	l, err := NewLego(c.info)
 	if err != nil {
 		logx.Node(c.tag).WithError(err).Error("创建lego客户端失败")
@@ -32,7 +32,7 @@ func (c *Controller) renewCertTask(_ context.Context) error {
 	return nil
 }
 
-func (c *Controller) requestCert() error {
+func (c *XrayController) requestCert() error {
 	certFile := filepath.Join("/etc/PPanel-node/", c.info.Type+strconv.Itoa(c.info.Id)+".cer")
 	keyFile := filepath.Join("/etc/PPanel-node/", c.info.Type+strconv.Itoa(c.info.Id)+".key")
 	switch c.info.Protocol.CertMode {
