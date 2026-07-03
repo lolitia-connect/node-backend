@@ -68,11 +68,15 @@ func Build(nodeInfo *panel.NodeInfo, tag string) (*core.InboundHandlerConfig, er
 				in.StreamSetting = &coreConf.StreamConfig{}
 			}
 			in.StreamSetting.Security = "tls"
+			certId := nodeInfo.Type
+			if nodeInfo.Protocol.ID != "" {
+				certId = nodeInfo.Protocol.ID
+			}
 			in.StreamSetting.TLSSettings = &coreConf.TLSConfig{
 				Certs: []*coreConf.TLSCertConfig{
 					{
-						CertFile: filepath.Join("/etc/PPanel-node/", nodeInfo.Type+strconv.Itoa(nodeInfo.Id)+".cer"),
-						KeyFile:  filepath.Join("/etc/PPanel-node/", nodeInfo.Type+strconv.Itoa(nodeInfo.Id)+".key"),
+						CertFile: filepath.Join("/etc/PPanel-node/", certId+strconv.Itoa(nodeInfo.Id)+".cer"),
+						KeyFile:  filepath.Join("/etc/PPanel-node/", certId+strconv.Itoa(nodeInfo.Id)+".key"),
 					},
 				},
 			}

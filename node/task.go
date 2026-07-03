@@ -28,9 +28,9 @@ func (c *XrayController) startTasks(node *panel.NodeInfo) {
 		ReloadCh: c.server.ReloadCh,
 	}
 	_ = c.userListMonitorPeriodic.Start(false)
-	logx.Node(c.tag).Info("用户列表监控任务已启动")
+	logx.Xray(c.tag).Info("用户列表监控任务已启动")
 	_ = c.userReportPeriodic.Start(false)
-	logx.Node(c.tag).Info("用户流量报告任务已启动")
+	logx.Xray(c.tag).Info("用户流量报告任务已启动")
 	var security string
 	switch node.Type {
 	case "vless":
@@ -59,7 +59,7 @@ func (c *XrayController) startTasks(node *panel.NodeInfo) {
 				Execute:  c.renewCertTask,
 				ReloadCh: c.server.ReloadCh,
 			}
-			logx.Node(c.tag).Info("证书定期更新任务已启动")
+			logx.Xray(c.tag).Info("证书定期更新任务已启动")
 			// delay to start renewCert
 			_ = c.renewCertPeriodic.Start(true)
 		}
@@ -79,13 +79,13 @@ func (c *XrayController) userListMonitor(ctx context.Context) (err error) {
 	// get user info
 	newU, err := c.apiClient.GetUserList(ctx)
 	if err != nil {
-		logx.Node(c.tag).WithError(err).Error("获取用户列表失败")
+		logx.Xray(c.tag).WithError(err).Error("获取用户列表失败")
 		return nil
 	}
 	// get user alive
 	newA, err := c.apiClient.GetUserAlive()
 	if err != nil {
-		logx.Node(c.tag).WithError(err).Error("获取在线列表失败")
+		logx.Xray(c.tag).WithError(err).Error("获取在线列表失败")
 		return nil
 	}
 	// update alive list
@@ -102,7 +102,7 @@ func (c *XrayController) userListMonitor(ctx context.Context) (err error) {
 		// have deleted users
 		err = c.server.DelUsers(deleted, c.tag, c.info)
 		if err != nil {
-			logx.Node(c.tag).WithError(err).Error("删除用户失败")
+			logx.Xray(c.tag).WithError(err).Error("删除用户失败")
 			return nil
 		}
 	}
@@ -114,7 +114,7 @@ func (c *XrayController) userListMonitor(ctx context.Context) (err error) {
 			Users:    added,
 		})
 		if err != nil {
-			logx.Node(c.tag).WithError(err).Error("添加用户失败")
+			logx.Xray(c.tag).WithError(err).Error("添加用户失败")
 			return nil
 		}
 	}
@@ -122,13 +122,13 @@ func (c *XrayController) userListMonitor(ctx context.Context) (err error) {
 		// update Limiter
 		c.limiter.UpdateUser(c.tag, added, deleted)
 		if err != nil {
-			logx.Node(c.tag).WithError(err).Error("更新限速用户失败")
+			logx.Xray(c.tag).WithError(err).Error("更新限速用户失败")
 			return nil
 		}
 	}
 	c.userList = newU
 	if len(added)+len(deleted) != 0 {
-		logx.Node(c.tag).WithFields(map[string]interface{}{
+		logx.Xray(c.tag).WithFields(map[string]interface{}{
 			"user_deleted": len(deleted),
 			"user_added":   len(added),
 		}).Info("用户列表已更新")
@@ -145,14 +145,14 @@ func (c *XrayController) reportUserTrafficTask(ctx context.Context) (err error) 
 	if len(userTraffic) > 0 {
 		err = c.apiClient.ReportUserTraffic(ctx, &userTraffic)
 		if err != nil {
-			logx.Node(c.tag).WithError(err).Error("上报用户流量失败")
+			logx.Xray(c.tag).WithError(err).Error("上报用户流量失败")
 		} else {
-			logx.Node(c.tag).WithField("user_reported", len(userTraffic)).Info("已上报用户消耗流量")
+			logx.Xray(c.tag).WithField("user_reported", len(userTraffic)).Info("已上报用户消耗流量")
 		}
 	}
 
 	if onlineDevice, err := c.limiter.GetOnlineDevice(); err != nil {
-		logx.Node(c.tag).WithError(err).Error("获取在线设备失败")
+		logx.Xray(c.tag).WithError(err).Error("获取在线设备失败")
 	} else if len(*onlineDevice) > 0 {
 		// Only report user has traffic > 100kb to allow ping test
 		var result []panel.OnlineUser
@@ -169,9 +169,9 @@ func (c *XrayController) reportUserTrafficTask(ctx context.Context) (err error) 
 			}
 		}
 		if err = c.apiClient.ReportNodeOnlineUsers(ctx, &result); err != nil {
-			logx.Node(c.tag).WithError(err).Error("上报在线用户失败")
+			logx.Xray(c.tag).WithError(err).Error("上报在线用户失败")
 		} else {
-			logx.Node(c.tag).WithFields(map[string]interface{}{
+			logx.Xray(c.tag).WithFields(map[string]interface{}{
 				"online_total":    len(*onlineDevice),
 				"online_reported": len(result),
 			}).Info("已上报在线用户")
@@ -180,7 +180,7 @@ func (c *XrayController) reportUserTrafficTask(ctx context.Context) (err error) 
 
 	CPU, Mem, Disk, Uptime, err := serverstatus.GetSystemInfo()
 	if err != nil {
-		logx.Node(c.tag).WithError(err).Error("获取系统信息失败")
+		logx.Xray(c.tag).WithError(err).Error("获取系统信息失败")
 	}
 	err = c.apiClient.ReportNodeStatus(
 		&panel.NodeStatus{
@@ -190,7 +190,7 @@ func (c *XrayController) reportUserTrafficTask(ctx context.Context) (err error) 
 			Uptime: Uptime,
 		})
 	if err != nil {
-		logx.Node(c.tag).WithError(err).Error("上报节点状态失败")
+		logx.Xray(c.tag).WithError(err).Error("上报节点状态失败")
 	}
 
 	userTraffic = nil

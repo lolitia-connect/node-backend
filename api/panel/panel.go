@@ -13,14 +13,15 @@ import (
 )
 
 type NodeClient struct {
-	Client    *resty.Client
-	APIHost   string
-	SecretKey string
-	NodeType  string
-	NodeId    int
-	userEtag  string
-	UserList  *UserListBody
-	AliveMap  *AliveMap
+	Client     *resty.Client
+	APIHost    string
+	SecretKey  string
+	NodeType   string
+	ProtocolID string
+	NodeId     int
+	userEtag   string
+	UserList   *UserListBody
+	AliveMap   *AliveMap
 }
 
 type ServerClient struct {
@@ -65,18 +66,20 @@ func NewNodeClient(c *conf.NodeApiConfig) (*NodeClient, error) {
 	}
 	// set params
 	client.SetQueryParams(map[string]string{
-		"protocol":   c.NodeType,
-		"server_id":  strconv.Itoa(c.NodeID),
-		"secret_key": c.SecretKey,
+		"protocol":    c.NodeType,
+		"protocol_id": c.ProtocolID,
+		"server_id":   strconv.Itoa(c.NodeID),
+		"secret_key":  c.SecretKey,
 	})
 	return &NodeClient{
-		Client:    client,
-		SecretKey: c.SecretKey,
-		APIHost:   c.APIHost,
-		NodeType:  c.NodeType,
-		NodeId:    c.NodeID,
-		UserList:  &UserListBody{},
-		AliveMap:  &AliveMap{},
+		Client:     client,
+		SecretKey:  c.SecretKey,
+		APIHost:    c.APIHost,
+		NodeType:   c.NodeType,
+		ProtocolID: c.ProtocolID,
+		NodeId:     c.NodeID,
+		UserList:   &UserListBody{},
+		AliveMap:   &AliveMap{},
 	}, nil
 }
 

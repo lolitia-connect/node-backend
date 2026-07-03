@@ -62,6 +62,14 @@ func Node(tag string) *log.Entry {
 	return Component("node").WithField(FieldNodeTag, tag)
 }
 
+func Xray(tag string) *log.Entry {
+	return Component("xray").WithField(FieldNodeTag, tag)
+}
+
+func Mieru(tag string) *log.Entry {
+	return Component("mieru").WithField(FieldNodeTag, tag)
+}
+
 func Task(name string) *log.Entry {
 	return Component("task").WithField(FieldTask, name)
 }

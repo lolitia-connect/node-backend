@@ -37,10 +37,11 @@ func New(core *vCore.XrayCore, config *conf.Conf, serverconfig *panel.ServerConf
 			Protocol:               &nodeconfig,
 		}
 		p, err := panel.NewNodeClient(&conf.NodeApiConfig{
-			APIHost:   config.ApiConfig.ApiHost,
-			NodeType:  nodeconfig.Type,
-			NodeID:    config.ApiConfig.ServerId,
-			SecretKey: config.ApiConfig.SecretKey,
+			APIHost:    config.ApiConfig.ApiHost,
+			NodeType:   nodeconfig.Type,
+			ProtocolID: nodeconfig.ID,
+			NodeID:     config.ApiConfig.ServerId,
+			SecretKey:  config.ApiConfig.SecretKey,
 		})
 		if err != nil {
 			return nil, err
