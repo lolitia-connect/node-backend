@@ -33,7 +33,11 @@ type Lego struct {
 }
 
 func NewLego(info *panel.NodeInfo) (*Lego, error) {
-	certFile := filepath.Join("/etc/PPanel-node/", info.Type+strconv.Itoa(info.Id)+".cer")
+	certId := info.Type
+	if info.Protocol != nil && info.Protocol.ID != "" {
+		certId = info.Protocol.ID
+	}
+	certFile := filepath.Join("/etc/PPanel-node/", certId+strconv.Itoa(info.Id)+".cer")
 	//keyFile := filepath.Join("/etc/PPanel-node/", info.Type+strconv.Itoa(info.Id)+".key")
 	user, err := NewLegoUser(path.Join(path.Dir(certFile),
 		"user",
@@ -117,8 +121,15 @@ func (l *Lego) CreateCert() (err error) {
 	return nil
 }
 
+func (l *Lego) certId() string {
+	if l.info.Protocol != nil && l.info.Protocol.ID != "" {
+		return l.info.Protocol.ID
+	}
+	return l.info.Type
+}
+
 func (l *Lego) RenewCert() error {
-	certFile := filepath.Join("/etc/PPanel-node/", l.info.Type+strconv.Itoa(l.info.Id)+".cer")
+	certFile := filepath.Join("/etc/PPanel-node/", l.certId()+strconv.Itoa(l.info.Id)+".cer")
 	//keyFile := filepath.Join("/etc/PPanel-node/", info.Type+strconv.Itoa(info.Id)+".key")
 	file, err := os.ReadFile(certFile)
 	if err != nil {
@@ -156,8 +167,8 @@ func (l *Lego) CheckCert(file []byte) (bool, error) {
 }
 
 func (l *Lego) writeCert(certificates *certificate.Resource) error {
-	certFile := filepath.Join("/etc/PPanel-node/", l.info.Type+strconv.Itoa(l.info.Id)+".cer")
-	keyFile := filepath.Join("/etc/PPanel-node/", l.info.Type+strconv.Itoa(l.info.Id)+".key")
+	certFile := filepath.Join("/etc/PPanel-node/", l.certId()+strconv.Itoa(l.info.Id)+".cer")
+	keyFile := filepath.Join("/etc/PPanel-node/", l.certId()+strconv.Itoa(l.info.Id)+".key")
 	err := checkPath(certFile)
 	if err != nil {
 		return fmt.Errorf("check path error: %s", err)

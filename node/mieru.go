@@ -53,7 +53,11 @@ type MieruController struct {
 
 // NewMieruController creates a new mieru controller.
 func NewMieruController(config *conf.Conf, apiClient *panel.NodeClient, info *panel.NodeInfo) *MieruController {
-	tag := fmt.Sprintf("[%s]-%s:%d", apiClient.APIHost, info.Type, info.Id)
+	protocolID := info.Type
+	if info.Protocol != nil && info.Protocol.ID != "" {
+		protocolID = info.Protocol.ID
+	}
+	tag := fmt.Sprintf("[%s]-%s(%s):%d", apiClient.APIHost, info.Type, protocolID, info.Id)
 	return &MieruController{
 		tag:         tag,
 		info:        info,
@@ -141,17 +145,17 @@ func (c *MieruController) Start() error {
 
 	// Serve socks5 in background
 	go func() {
-		logx.Node(c.tag).Info("mieru socks5 server is running")
+		logx.Mieru(c.tag).Info("mieru socks5 server is running")
 		if err := socks5Srv.Serve(mux); err != nil {
-			logx.Node(c.tag).WithError(err).Error("mieru socks5 server stopped with error")
+			logx.Mieru(c.tag).WithError(err).Error("mieru socks5 server stopped with error")
 		}
-		logx.Node(c.tag).Info("mieru socks5 server stopped")
+		logx.Mieru(c.tag).Info("mieru socks5 server stopped")
 	}()
 
 	// Start periodic tasks
 	c.startTasks()
 
-	logx.Node(c.tag).Infof("mieru node started on port %d with %d users", c.info.Protocol.Port, len(userList))
+	logx.Mieru(c.tag).Infof("mieru node started on port %d with %d users", c.info.Protocol.Port, len(userList))
 	return nil
 }
 
@@ -175,17 +179,17 @@ func (c *MieruController) Close() error {
 	// Stop socks5 and mux
 	if c.socks5Srv != nil {
 		if err := c.socks5Srv.Close(); err != nil {
-			logx.Node(c.tag).WithError(err).Warn("close socks5 server error")
+			logx.Mieru(c.tag).WithError(err).Warn("close socks5 server error")
 		}
 	}
 	if c.mux != nil {
 		if err := c.mux.Close(); err != nil {
-			logx.Node(c.tag).WithError(err).Warn("close mux error")
+			logx.Mieru(c.tag).WithError(err).Warn("close mux error")
 		}
 	}
 
 	c.running = false
-	logx.Node(c.tag).Info("mieru node stopped")
+	logx.Mieru(c.tag).Info("mieru node stopped")
 	return nil
 }
 
@@ -202,16 +206,16 @@ func (c *MieruController) startTasks() {
 		Execute:  c.reportUserTrafficTask,
 	}
 	_ = c.userListMonitorPeriodic.Start(false)
-	logx.Node(c.tag).Info("mieru 用户列表监控任务已启动")
+	logx.Mieru(c.tag).Info("mieru 用户列表监控任务已启动")
 	_ = c.userReportPeriodic.Start(false)
-	logx.Node(c.tag).Info("mieru 用户流量报告任务已启动")
+	logx.Mieru(c.tag).Info("mieru 用户流量报告任务已启动")
 }
 
 // userListMonitor periodically fetches the user list from the panel and updates mieru users.
 func (c *MieruController) userListMonitor(ctx context.Context) error {
 	newU, err := c.apiClient.GetUserList(ctx)
 	if err != nil {
-		logx.Node(c.tag).WithError(err).Error("mieru: get user list failed")
+		logx.Mieru(c.tag).WithError(err).Error("mieru: get user list failed")
 		return nil
 	}
 	if newU == nil {
@@ -227,7 +231,7 @@ func (c *MieruController) userListMonitor(ctx context.Context) error {
 		c.userList = newU
 		c.mu.Unlock()
 
-		logx.Node(c.tag).Infof("mieru 用户列表已更新: 添加 %d, 删除 %d", len(added), len(deleted))
+		logx.Mieru(c.tag).Infof("mieru 用户列表已更新: 添加 %d, 删除 %d", len(added), len(deleted))
 	}
 	return nil
 }
@@ -275,22 +279,22 @@ func (c *MieruController) reportUserTrafficTask(ctx context.Context) error {
 
 	if len(userTraffic) > 0 {
 		if err := c.apiClient.ReportUserTraffic(ctx, &userTraffic); err != nil {
-			logx.Node(c.tag).WithError(err).Error("mieru: report user traffic failed")
+			logx.Mieru(c.tag).WithError(err).Error("mieru: report user traffic failed")
 		} else {
-			logx.Node(c.tag).Infof("mieru 已上报 %d 名用户消耗流量", len(userTraffic))
+			logx.Mieru(c.tag).Infof("mieru 已上报 %d 名用户消耗流量", len(userTraffic))
 		}
 	}
 
 	// Report node status
 	CPU, Mem, Disk, Uptime, err := serverstatus.GetSystemInfo()
 	if err != nil {
-		logx.Node(c.tag).WithError(err).Warn("mieru: get system info failed")
+		logx.Mieru(c.tag).WithError(err).Warn("mieru: get system info failed")
 		return nil
 	}
 	if err := c.apiClient.ReportNodeStatus(&panel.NodeStatus{
 		CPU: CPU, Mem: Mem, Disk: Disk, Uptime: Uptime,
 	}); err != nil {
-		logx.Node(c.tag).WithError(err).Warn("mieru: report node status failed")
+		logx.Mieru(c.tag).WithError(err).Warn("mieru: report node status failed")
 	}
 	return nil
 }

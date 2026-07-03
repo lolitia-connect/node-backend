@@ -33,8 +33,12 @@ func (c *XrayController) renewCertTask(_ context.Context) error {
 }
 
 func (c *XrayController) requestCert() error {
-	certFile := filepath.Join("/etc/PPanel-node/", c.info.Type+strconv.Itoa(c.info.Id)+".cer")
-	keyFile := filepath.Join("/etc/PPanel-node/", c.info.Type+strconv.Itoa(c.info.Id)+".key")
+	certId := c.info.Type
+	if c.info.Protocol != nil && c.info.Protocol.ID != "" {
+		certId = c.info.Protocol.ID
+	}
+	certFile := filepath.Join("/etc/PPanel-node/", certId+strconv.Itoa(c.info.Id)+".cer")
+	keyFile := filepath.Join("/etc/PPanel-node/", certId+strconv.Itoa(c.info.Id)+".key")
 	switch c.info.Protocol.CertMode {
 	case "none", "", "file":
 	case "dns", "http":

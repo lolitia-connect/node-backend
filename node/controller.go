@@ -76,7 +76,7 @@ func (c *XrayController) Start() error {
 	if err != nil {
 		return fmt.Errorf("add users error: %s", err)
 	}
-	logx.Node(c.tag).WithField("user_added", added).Info("已添加新用户")
+	logx.Xray(c.tag).WithField("user_added", added).Info("已添加新用户")
 	c.startTasks(c.info)
 	return nil
 }
@@ -117,5 +117,10 @@ func (c *XrayController) Close() error {
 }
 
 func (c *XrayController) buildNodeTag(node *panel.NodeInfo) string {
-	return fmt.Sprintf("[%s]-%s:%d", c.apiClient.APIHost, node.Type, node.Id)
+	protocolType := node.Type
+	protocolID := protocolType
+	if node.Protocol != nil && node.Protocol.ID != "" {
+		protocolID = node.Protocol.ID
+	}
+	return fmt.Sprintf("[%s]-%s(%s):%d", c.apiClient.APIHost, protocolType, protocolID, node.Id)
 }
