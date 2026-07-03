@@ -5,3 +5,5 @@ app/legocmd/.lego/
 output/*
 .idea/*
 new.sh
+
+config-dev.yml
