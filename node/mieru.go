@@ -304,12 +304,13 @@ func (c *MieruController) reportUserTrafficTask(ctx context.Context) error {
 func buildMieruUsers(userList []panel.UserInfo) map[string]*appctlpb.User {
 	mieruUsers := make(map[string]*appctlpb.User, len(userList))
 	for _, u := range userList {
-		password := u.Uuid
-		if password == "" {
-			password = fmt.Sprintf("user_%d", u.Id)
+		if u.Uuid == "" {
+			logx.Component("mieru").WithField("user_id", u.Id).Error("user UUID is empty, skipping")
+			continue
 		}
+		password := u.Uuid
 		mieruUsers[fmt.Sprintf("%d", u.Id)] = &appctlpb.User{
-			Name:     proto.String(u.Uuid),
+			Name:     proto.String(password), // same as password
 			Password: proto.String(password),
 		}
 	}
