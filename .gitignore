@@ -7,3 +7,38 @@ output/*
 new.sh
 
 config-dev.yml
+
+# Build outputs
+bin/
+build/
+dist/
+output/
+*.exe
+*.test
+
+# Test and coverage artifacts
+test-artifacts/
+coverage/
+*.out
+*.prof
+*.cover
+*.coverage
+
+# Logs and temporary files
+logs/
+*.log
+*.log*
+tmp/
+temp/
+*.tmp
+
+# Local databases
+*.db
+*.sqlite
+*.sqlite3
+
+# Local env files
+.env
+.env.*
+*.local.yaml
+*.local.yml
