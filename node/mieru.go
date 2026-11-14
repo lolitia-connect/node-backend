@@ -2,15 +2,18 @@ package node
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"net"
+	"strings"
 	"sync"
 	"time"
 
+	apicommon "github.com/enfein/mieru/v3/apis/common"
 	"github.com/enfein/mieru/v3/apis/trafficpattern"
 	"github.com/enfein/mieru/v3/pkg/appctl/appctlcommon"
 	"github.com/enfein/mieru/v3/pkg/appctl/appctlpb"
 	"github.com/enfein/mieru/v3/pkg/common"
-	"github.com/enfein/mieru/v3/pkg/metrics"
 	"github.com/enfein/mieru/v3/pkg/protocol"
 	"github.com/enfein/mieru/v3/pkg/socks5"
 	"google.golang.org/protobuf/proto"
@@ -22,14 +25,6 @@ import (
 	"github.com/perfect-panel/ppanel-node/conf"
 )
 
-// userTrafficSnapshot stores the last reported cumulative upload/download values.
-// Mieru counters (COUNTER_TIME_SERIES) are monotonically increasing and
-// don't support Store(0), so we must compute deltas ourselves.
-type userTrafficSnapshot struct {
-	upload   int64
-	download int64
-}
-
 // MieruController manages a mieru proxy node, parallel to XrayController.
 type MieruController struct {
 	mux       *protocol.Mux
@@ -39,13 +34,16 @@ type MieruController struct {
 	config    *conf.Conf
 	apiClient *panel.NodeClient
 	userList  []panel.UserInfo
+	userIDs   map[string]int
 
 	userListMonitorPeriodic *task.Task
 	userReportPeriodic      *task.Task
 
-	// lastTraffic tracks the last reported cumulative traffic per user ID.
-	// Used to compute delta since mieru Counter doesn't support Store(0).
-	lastTraffic map[int]userTrafficSnapshot
+	pendingTraffic map[int]panel.UserTraffic
+	connections    map[*mieruConn]struct{}
+	serveDone      chan struct{}
+	traffic        *trafficQueue
+	prepared       bool
 
 	mu      sync.Mutex
 	running bool
@@ -59,16 +57,37 @@ func NewMieruController(config *conf.Conf, apiClient *panel.NodeClient, info *pa
 	}
 	tag := fmt.Sprintf("[%s]-%s(%s):%d", apiClient.APIHost, info.Type, protocolID, info.Id)
 	return &MieruController{
-		tag:         tag,
-		info:        info,
-		config:      config,
-		apiClient:   apiClient,
-		lastTraffic: make(map[int]userTrafficSnapshot),
+		tag:            tag,
+		info:           info,
+		config:         config,
+		apiClient:      apiClient,
+		pendingTraffic: make(map[int]panel.UserTraffic),
+		connections:    make(map[*mieruConn]struct{}),
+		traffic:        newTrafficQueue(),
 	}
+}
+
+func (c *MieruController) Prepare() error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.prepared {
+		return nil
+	}
+	users, err := c.apiClient.GetUserList(context.Background())
+	if err != nil {
+		return fmt.Errorf("mieru %s: get user list: %w", c.tag, err)
+	}
+	c.userList = users
+	c.updateUserIDs(users)
+	c.prepared = true
+	return nil
 }
 
 // Start starts the mieru node.
 func (c *MieruController) Start() error {
+	if err := c.Prepare(); err != nil {
+		return err
+	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
@@ -76,22 +95,22 @@ func (c *MieruController) Start() error {
 		return fmt.Errorf("mieru node %s is already running", c.tag)
 	}
 
-	// Fetch user list from panel
-	userList, err := c.apiClient.GetUserList(context.Background())
-	if err != nil {
-		return fmt.Errorf("mieru %s: get user list error: %w", c.tag, err)
+	mieruUsers := buildMieruUsers(c.userList)
+	if len(mieruUsers) > 0 {
+		if err := c.startProxy(mieruUsers); err != nil {
+			return err
+		}
 	}
-	if len(userList) == 0 {
-		return fmt.Errorf("mieru %s: no users configured", c.tag)
-	}
-	c.userList = userList
+	c.running = true
+	c.startTasks()
+	logx.Mieru(c.tag).Infof("mieru node started on port %d with %d users", c.info.Protocol.Port, len(c.userList))
+	return nil
+}
 
-	// Build mieru users from panel data — use Uuid as credential
-	mieruUsers := buildMieruUsers(userList)
-
+func (c *MieruController) startProxy(mieruUsers map[string]*appctlpb.User) error {
 	// Determine transport protocol
 	transportTCP := true
-	if c.info.Protocol.Transport == "udp" {
+	if strings.EqualFold(c.info.Protocol.Transport, "udp") {
 		transportTCP = false
 	}
 
@@ -108,7 +127,7 @@ func (c *MieruController) Start() error {
 
 	// Create underlay properties
 	mtu := common.DefaultMTU
-	endpoints, err := appctlcommon.PortBindingsToUnderlayProperties([]*appctlpb.PortBinding{portBinding}, mtu)
+	endpoints, err := appctlcommon.AddrPortToUnderlayProperties("", []*appctlpb.PortBinding{portBinding}, mtu)
 	if err != nil {
 		return fmt.Errorf("mieru %s: create endpoints error: %w", c.tag, err)
 	}
@@ -136,59 +155,63 @@ func (c *MieruController) Start() error {
 
 	// Start the mux
 	if err := mux.Start(); err != nil {
+		_ = mux.Close()
+		_ = socks5Srv.Close()
 		return fmt.Errorf("mieru %s: start mux error: %w", c.tag, err)
 	}
 
 	c.mux = mux
 	c.socks5Srv = socks5Srv
-	c.running = true
+	c.serveDone = make(chan struct{})
 
-	// Serve socks5 in background
-	go func() {
-		logx.Mieru(c.tag).Info("mieru socks5 server is running")
-		if err := socks5Srv.Serve(mux); err != nil {
-			logx.Mieru(c.tag).WithError(err).Error("mieru socks5 server stopped with error")
-		}
-		logx.Mieru(c.tag).Info("mieru socks5 server stopped")
-	}()
-
-	// Start periodic tasks
-	c.startTasks()
-
-	logx.Mieru(c.tag).Infof("mieru node started on port %d with %d users", c.info.Protocol.Port, len(userList))
+	go c.serve(mux, socks5Srv, c.serveDone)
 	return nil
 }
 
 // Close stops the mieru node.
 func (c *MieruController) Close() error {
-	c.mu.Lock()
-	defer c.mu.Unlock()
+	return c.Stop()
+}
 
+func (c *MieruController) Stop() error {
+	c.mu.Lock()
 	if !c.running {
+		c.mu.Unlock()
 		return nil
 	}
-
-	// Stop periodic tasks
-	if c.userListMonitorPeriodic != nil {
-		c.userListMonitorPeriodic.Close()
+	monitor, report := c.userListMonitorPeriodic, c.userReportPeriodic
+	c.userListMonitorPeriodic, c.userReportPeriodic = nil, nil
+	c.running = false
+	mux, server, done := c.mux, c.socks5Srv, c.serveDone
+	connections := make([]*mieruConn, 0, len(c.connections))
+	for connection := range c.connections {
+		connections = append(connections, connection)
 	}
-	if c.userReportPeriodic != nil {
-		c.userReportPeriodic.Close()
+	c.mu.Unlock()
+	if monitor != nil {
+		monitor.Close()
 	}
-
-	// Stop socks5 and mux
-	if c.socks5Srv != nil {
-		if err := c.socks5Srv.Close(); err != nil {
-			logx.Mieru(c.tag).WithError(err).Warn("close socks5 server error")
-		}
+	if report != nil {
+		report.Close()
 	}
-	if c.mux != nil {
-		if err := c.mux.Close(); err != nil {
+	for _, connection := range connections {
+		_ = connection.Close()
+	}
+	if server != nil {
+		_ = server.Close()
+	}
+	if mux != nil {
+		if err := mux.Close(); err != nil {
 			logx.Mieru(c.tag).WithError(err).Warn("close mux error")
 		}
 	}
-
-	c.running = false
+	if done != nil {
+		<-done
+	}
+	c.mu.Lock()
+	c.mux, c.socks5Srv, c.serveDone = nil, nil, nil
+	c.mu.Unlock()
+	c.collectTraffic(0)
 	logx.Mieru(c.tag).Info("mieru node stopped")
 	return nil
 }
@@ -222,81 +245,72 @@ func (c *MieruController) userListMonitor(ctx context.Context) error {
 		return nil // 304 Not Modified
 	}
 
-	// Compare and update
-	deleted, added := compareUserList(c.userList, newU)
-	if len(deleted) > 0 || len(added) > 0 {
-		c.mu.Lock()
-		mieruUsers := buildMieruUsers(newU)
-		c.mux.SetServerUsers(mieruUsers)
-		c.userList = newU
+	c.mu.Lock()
+	if !c.running {
 		c.mu.Unlock()
+		return nil
+	}
+	deleted, added := compareUserList(c.userList, newU)
+	var revoked []*mieruConn
+	if len(deleted) > 0 || len(added) > 0 {
+		c.collectTrafficLocked(0)
+		mieruUsers := buildMieruUsers(newU)
+		if c.mux != nil {
+			c.mux.SetServerUsers(mieruUsers)
+		} else if len(mieruUsers) > 0 {
+			if err := c.startProxy(mieruUsers); err != nil {
+				c.apiClient.ResetUserETag()
+				c.mu.Unlock()
+				return err
+			}
+		}
+		c.userList = newU
+		c.updateUserIDs(newU)
+		for connection := range c.connections {
+			for _, user := range deleted {
+				if connection.UserName() == user.Uuid {
+					revoked = append(revoked, connection)
+					break
+				}
+			}
+		}
 
 		logx.Mieru(c.tag).Infof("mieru 用户列表已更新: 添加 %d, 删除 %d", len(added), len(deleted))
+	}
+	c.mu.Unlock()
+	for _, connection := range revoked {
+		_ = connection.Close()
 	}
 	return nil
 }
 
 // reportUserTrafficTask periodically reports user traffic to the panel.
 func (c *MieruController) reportUserTrafficTask(ctx context.Context) error {
-	var userTraffic []panel.UserTraffic
-	var threshold int64
-	if c.info.TrafficReportThreshold > 0 {
-		threshold = int64(c.info.TrafficReportThreshold)
-	}
-
-	// Read per-user traffic from mieru metrics and compute delta since last report.
-	for _, u := range c.userList {
-		userMetrics := metrics.GetMetricsForUser(u.Uuid)
-		if userMetrics == nil {
-			continue
-		}
-		var up, down int64
-		for _, m := range userMetrics {
-			switch m.Name() {
-			case metrics.UserMetricUploadBytes:
-				up = m.Load()
-			case metrics.UserMetricDownloadBytes:
-				down = m.Load()
-			}
-		}
-
-		// Compute delta since last report
-		last := c.lastTraffic[u.Id]
-		deltaUp := up - last.upload
-		deltaDown := down - last.download
-
-		// Update the snapshot regardless of threshold
-		c.lastTraffic[u.Id] = userTrafficSnapshot{upload: up, download: down}
-
-		if deltaUp+deltaDown > threshold {
-			userTraffic = append(userTraffic, panel.UserTraffic{
-				UID:      u.Id,
-				Upload:   deltaUp,
-				Download: deltaDown,
-			})
-		}
-	}
-
-	if len(userTraffic) > 0 {
-		if err := c.apiClient.ReportUserTraffic(ctx, &userTraffic); err != nil {
-			logx.Mieru(c.tag).WithError(err).Error("mieru: report user traffic failed")
-		} else {
-			logx.Mieru(c.tag).Infof("mieru 已上报 %d 名用户消耗流量", len(userTraffic))
-		}
-	}
-
-	// Report node status
 	CPU, Mem, Disk, Uptime, err := serverstatus.GetSystemInfo()
 	if err != nil {
-		logx.Mieru(c.tag).WithError(err).Warn("mieru: get system info failed")
-		return nil
+		return err
 	}
-	if err := c.apiClient.ReportNodeStatus(&panel.NodeStatus{
+	return c.apiClient.ReportNodeStatusContext(ctx, &panel.NodeStatus{
 		CPU: CPU, Mem: Mem, Disk: Disk, Uptime: Uptime,
-	}); err != nil {
-		logx.Mieru(c.tag).WithError(err).Warn("mieru: report node status failed")
+	})
+}
+
+func (c *MieruController) collectTraffic(threshold int64) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.collectTrafficLocked(threshold)
+}
+
+func (c *MieruController) collectTrafficLocked(threshold int64) {
+	var userTraffic []panel.UserTraffic
+	for userID, traffic := range c.pendingTraffic {
+		if traffic.Upload+traffic.Download > threshold {
+			userTraffic = append(userTraffic, traffic)
+			delete(c.pendingTraffic, userID)
+		}
 	}
-	return nil
+
+	c.traffic.add(c.apiClient, userTraffic)
 }
 
 // buildMieruUsers converts panel UserInfo list to mieru User map.
@@ -309,12 +323,106 @@ func buildMieruUsers(userList []panel.UserInfo) map[string]*appctlpb.User {
 			continue
 		}
 		password := u.Uuid
-		mieruUsers[fmt.Sprintf("%d", u.Id)] = &appctlpb.User{
+		mieruUsers[password] = &appctlpb.User{
 			Name:     proto.String(password), // same as password
 			Password: proto.String(password),
 		}
 	}
 	return mieruUsers
+}
+
+func (c *MieruController) serve(mux *protocol.Mux, server *socks5.Server, done chan struct{}) {
+	var handlers sync.WaitGroup
+	defer close(done)
+	defer handlers.Wait()
+	for {
+		connection, err := mux.Accept()
+		if err != nil {
+			return
+		}
+		c.mu.Lock()
+		if !c.running {
+			c.mu.Unlock()
+			_ = connection.Close()
+			return
+		}
+		counted := &mieruConn{Conn: connection, controller: c, users: c.userIDs}
+		c.connections[counted] = struct{}{}
+		c.mu.Unlock()
+		handlers.Add(1)
+		go func() {
+			defer handlers.Done()
+			defer func() {
+				c.mu.Lock()
+				delete(c.connections, counted)
+				c.mu.Unlock()
+			}()
+			_ = server.ServeConn(counted)
+		}()
+	}
+}
+
+type mieruConn struct {
+	net.Conn
+	controller *MieruController
+	users      map[string]int
+}
+
+func (c *MieruController) updateUserIDs(users []panel.UserInfo) {
+	identities := make(map[string]int, len(users))
+	for _, user := range users {
+		if user.Uuid != "" {
+			identities[user.Uuid] = user.Id
+		}
+	}
+	c.userIDs = identities
+}
+
+func (connection *mieruConn) UserName() string {
+	if user, ok := connection.Conn.(apicommon.UserContext); ok {
+		return user.UserName()
+	}
+	return ""
+}
+
+func (connection *mieruConn) Read(buffer []byte) (int, error) {
+	count, err := connection.Conn.Read(buffer)
+	if count > 0 {
+		userName := connection.UserName()
+		userID, known := connection.users[userName]
+		controller := connection.controller
+		controller.mu.Lock()
+		currentID, current := controller.userIDs[userName]
+		allowed := controller.running && known && current && currentID == userID
+		controller.mu.Unlock()
+		if !allowed {
+			_ = connection.Close()
+			return 0, errors.New("mieru user is no longer authorized")
+		}
+	}
+	connection.record(int64(count), 0)
+	return count, err
+}
+
+func (connection *mieruConn) Write(buffer []byte) (int, error) {
+	count, err := connection.Conn.Write(buffer)
+	connection.record(0, int64(count))
+	return count, err
+}
+
+func (connection *mieruConn) record(upload, download int64) {
+	userID, ok := connection.users[connection.UserName()]
+	if !ok || upload+download == 0 {
+		return
+	}
+	controller := connection.controller
+	controller.mu.Lock()
+	defer controller.mu.Unlock()
+	traffic := controller.pendingTraffic[userID]
+	traffic.UID = userID
+	traffic.Upload += upload
+	traffic.Download += download
+	controller.pendingTraffic[userID] = traffic
 }
 
 // buildTrafficPattern converts the panel "multiplex" field to a mieru TrafficPattern config.

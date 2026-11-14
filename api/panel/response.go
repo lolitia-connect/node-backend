@@ -35,6 +35,16 @@ func checkPanelEnvelope(code int, msg, url string) error {
 }
 
 func checkPanelResponse(r *resty.Response, url string) error {
+	if isProtobufResponse(r) {
+		result, err := unmarshalProtobufResult(r.Body())
+		if err != nil {
+			return err
+		}
+		if err := checkHTTPResponse(r, url); err != nil {
+			return err
+		}
+		return checkPanelEnvelope(int(result.Code), result.Message, url)
+	}
 	if err := checkHTTPResponse(r, url); err != nil {
 		return err
 	}

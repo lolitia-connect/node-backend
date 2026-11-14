@@ -4,70 +4,106 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/perfect-panel/ppanel-node/api/panel"
 	"github.com/perfect-panel/ppanel-node/common/logx"
 	"github.com/perfect-panel/ppanel-node/common/task"
 	vCore "github.com/perfect-panel/ppanel-node/core"
+	inboundbuilder "github.com/perfect-panel/ppanel-node/core/inbound"
 	"github.com/perfect-panel/ppanel-node/limiter"
+	xray "github.com/xtls/xray-core/core"
 )
 
-type XrayController struct {
+type Controller struct {
 	server                  *vCore.XrayCore
 	apiClient               *panel.NodeClient
 	tag                     string
 	limiter                 *limiter.Limiter
 	userList                []panel.UserInfo
 	aliveMap                map[int]int
+	localDeviceLimits       bool
 	info                    *panel.NodeInfo
 	userListMonitorPeriodic *task.Task
-	userReportPeriodic      *task.Task
+	onlinePeriodic          *task.Task
 	renewCertPeriodic       *task.Task
-	onlineIpReportPeriodic  *task.Task
+	traffic                 *trafficQueue
+	prepared                bool
+	started                 bool
+	inboundConfig           *xray.InboundHandlerConfig
 }
 
-// NewXrayController return a Node controller with default parameters.
-func NewXrayController(core *vCore.XrayCore, api *panel.NodeClient, info *panel.NodeInfo) *XrayController {
-	controller := &XrayController{
+func NewController(core *vCore.XrayCore, api *panel.NodeClient, info *panel.NodeInfo) *Controller {
+	controller := &Controller{
 		server:    core,
 		apiClient: api,
 		info:      info,
+		traffic:   newTrafficQueue(),
 	}
 	return controller
 }
 
-// Start implement the Start() function of the service interface
-func (c *XrayController) Start() error {
+// Prepare completes network requests and builds the inbound before stopping a
+// running node. The cached certificate and user snapshot also support rollback.
+func (c *Controller) Prepare() error {
+	if c.prepared {
+		return nil
+	}
 	var err error
+	c.tag = c.buildNodeTag(c.info)
+	selfCertificate := usesTLSCertificate(c.info) && strings.TrimSpace(c.info.Protocol.CertMode) == "self"
+	if selfCertificate {
+		if err = c.requestCert(); err != nil {
+			return fmt.Errorf("request self-signed certificate: %w", err)
+		}
+		if err = c.reportSelfCertificateSHA256(); err != nil {
+			return fmt.Errorf("report self-signed certificate fingerprint: %w", err)
+		}
+	}
+
 	// Update user
 	c.userList, err = c.apiClient.GetUserList(context.Background())
 	if err != nil {
 		return fmt.Errorf("get user list error: %s", err)
 	}
-	if len(c.userList) == 0 {
-		return errors.New("add users error: not have any user")
-	}
-	c.aliveMap, err = c.apiClient.GetUserAlive()
-	if err != nil {
+	c.aliveMap, err = c.apiClient.GetUserAlive(context.Background())
+	if errors.Is(err, panel.ErrDeviceAPIUnsupported) {
+		c.localDeviceLimits = true
+		c.aliveMap = make(map[int]int)
+	} else if err != nil {
 		return fmt.Errorf("failed to get user alive list: %s", err)
 	}
-	c.tag = c.buildNodeTag(c.info)
-
-	// add limiter
-	l := c.server.LimiterManager.Add(c.tag, c.userList, c.aliveMap)
-	c.limiter = l
-
-	if c.info.Protocol.Security == "tls" {
+	if usesTLSCertificate(c.info) && !selfCertificate {
 		err = c.requestCert()
 		if err != nil {
 			return fmt.Errorf("request cert error: %s", err)
 		}
 	}
-	// Add new tag
-	err = c.server.AddNode(c.tag, c.info)
+	c.inboundConfig, err = inboundbuilder.Build(c.info, c.tag)
 	if err != nil {
-		return fmt.Errorf("add new node error: %s", err)
+		return fmt.Errorf("build inbound: %w", err)
 	}
+	c.prepared = true
+	return nil
+}
+
+func (c *Controller) Start() error {
+	if c.started {
+		return nil
+	}
+	if err := c.Prepare(); err != nil {
+		return err
+	}
+	if c.limiter == nil {
+		c.limiter = c.server.LimiterManager.Add(c.tag, c.userList, c.aliveMap, c.info.Type)
+		if !c.localDeviceLimits {
+			c.limiter.SetDeviceAdmission(c.apiClient.ClaimDevice)
+		}
+	}
+	if err := c.server.AddNodeConfig(c.inboundConfig); err != nil {
+		return err
+	}
+	c.started = true
 	added, err := c.server.AddUsers(&vCore.AddUsersParams{
 		Tag:      c.tag,
 		Users:    c.userList,
@@ -81,46 +117,50 @@ func (c *XrayController) Start() error {
 	return nil
 }
 
-// Close implement the Close() function of the service interface
-func (c *XrayController) Close() error {
+// Stop releases listeners while retaining prepared configuration, users,
+// limiters and pending traffic so Start can restore service without the panel.
+func (c *Controller) Stop() error {
 	if c == nil {
 		return nil
 	}
-	if c.server != nil && c.server.LimiterManager != nil && c.tag != "" {
-		c.server.LimiterManager.Delete(c.tag)
+	if c.onlinePeriodic != nil {
+		c.onlinePeriodic.Close()
+		c.onlinePeriodic = nil
 	}
 	if c.userListMonitorPeriodic != nil {
 		c.userListMonitorPeriodic.Close()
 		c.userListMonitorPeriodic = nil
 	}
-	if c.userReportPeriodic != nil {
-		c.userReportPeriodic.Close()
-		c.userReportPeriodic = nil
-	}
 	if c.renewCertPeriodic != nil {
 		c.renewCertPeriodic.Close()
 		c.renewCertPeriodic = nil
 	}
-	if c.onlineIpReportPeriodic != nil {
-		c.onlineIpReportPeriodic.Close()
-		c.onlineIpReportPeriodic = nil
-	}
-	if c.server == nil || c.tag == "" {
+	if !c.started {
 		return nil
 	}
-	err := c.server.DelNode(c.tag)
-	if err != nil {
-		return fmt.Errorf("del node error: %s", err)
+	if err := c.server.DelNode(c.tag); err != nil {
+		return err
 	}
-	c.tag = ""
+	c.started = false
+	c.collectTraffic(0)
 	return nil
 }
 
-func (c *XrayController) buildNodeTag(node *panel.NodeInfo) string {
-	protocolType := node.Type
-	protocolID := protocolType
+func (c *Controller) Close() error {
+	if c == nil {
+		return nil
+	}
+	err := c.Stop()
+	if c.server != nil && c.server.LimiterManager != nil && c.tag != "" {
+		c.server.LimiterManager.Delete(c.tag)
+	}
+	return err
+}
+
+func (c *Controller) buildNodeTag(node *panel.NodeInfo) string {
+	protocolID := node.Type
 	if node.Protocol != nil && node.Protocol.ID != "" {
 		protocolID = node.Protocol.ID
 	}
-	return fmt.Sprintf("[%s]-%s(%s):%d", c.apiClient.APIHost, protocolType, protocolID, node.Id)
+	return fmt.Sprintf("[%s]-%s(%s):%d", c.apiClient.APIHost, node.Type, protocolID, node.Id)
 }

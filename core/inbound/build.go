@@ -6,15 +6,23 @@ import (
 	"fmt"
 	"path/filepath"
 	"strconv"
+	"strings"
 
 	"github.com/perfect-panel/ppanel-node/api/panel"
+	"github.com/perfect-panel/ppanel-node/core/protocol/nowhere"
+	tuiccompat "github.com/perfect-panel/ppanel-node/core/transport/tuic"
+	"github.com/xtls/xray-core/app/proxyman"
 	"github.com/xtls/xray-core/common/net"
+	"github.com/xtls/xray-core/common/serial"
 	"github.com/xtls/xray-core/core"
 	coreConf "github.com/xtls/xray-core/infra/conf"
 )
 
 // Build builds Inbound config for different protocol.
 func Build(nodeInfo *panel.NodeInfo, tag string) (*core.InboundHandlerConfig, error) {
+	if nodeInfo.Type == "nowhere" {
+		return nowhere.Build(nodeInfo, tag)
+	}
 	in := &coreConf.InboundDetourConfig{}
 	var err error
 	switch nodeInfo.Type {
@@ -57,31 +65,13 @@ func Build(nodeInfo *panel.NodeInfo, tag string) (*core.InboundHandlerConfig, er
 	}
 	in.SniffingConfig = sniffingConfig
 
-	// Set TLS or Reality settings
-	switch nodeInfo.Protocol.Security {
-	case "tls":
-		switch nodeInfo.Protocol.CertMode {
-		case "none", "":
-			break
-		default:
-			if in.StreamSetting == nil {
-				in.StreamSetting = &coreConf.StreamConfig{}
-			}
-			in.StreamSetting.Security = "tls"
-			certId := nodeInfo.Type
-			if nodeInfo.Protocol.ID != "" {
-				certId = nodeInfo.Protocol.ID
-			}
-			in.StreamSetting.TLSSettings = &coreConf.TLSConfig{
-				Certs: []*coreConf.TLSCertConfig{
-					{
-						CertFile: filepath.Join("/etc/PPanel-node/", certId+strconv.Itoa(nodeInfo.Id)+".cer"),
-						KeyFile:  filepath.Join("/etc/PPanel-node/", certId+strconv.Itoa(nodeInfo.Id)+".key"),
-					},
-				},
-			}
-		}
-	case "reality":
+	// Set TLS or Reality settings. TUIC and Hysteria use TLS natively; panel
+	// configurations that select a certificate mode must therefore enable the
+	// same certificate path even when their generic Security field is omitted.
+	if shouldConfigureTLS(nodeInfo) {
+		applyTLSSettings(nodeInfo, in)
+	}
+	if nodeInfo.Protocol.Security == "reality" {
 		if in.StreamSetting == nil {
 			in.StreamSetting = &coreConf.StreamConfig{}
 		}
@@ -105,13 +95,74 @@ func Build(nodeInfo *panel.NodeInfo, tag string) (*core.InboundHandlerConfig, er
 			ServerNames: []string{v.SNI},
 			PrivateKey:  v.RealityPrivateKey,
 			ShortIds:    []string{v.RealityShortID},
+			// Pin zero so core defaults cannot reintroduce a minimum client version.
+			MinClientVer: "0.0.0",
 			//Mldsa65Seed: v.RealityMldsa65Seed,
 		}
-	default:
-		break
 	}
 	in.Tag = tag
-	return in.Build()
+	built, err := in.Build()
+	if err != nil {
+		return nil, err
+	}
+	if nodeInfo.Type == "tuic" {
+		value, err := built.ReceiverSettings.GetInstance()
+		if err != nil {
+			return nil, err
+		}
+		receiver := value.(*proxyman.ReceiverConfig)
+		receiver.StreamSettings.ProtocolName = tuiccompat.ProtocolName
+		built.ReceiverSettings = serial.ToTypedMessage(receiver)
+	}
+	return built, nil
+}
+
+func shouldConfigureTLS(nodeInfo *panel.NodeInfo) bool {
+	if nodeInfo == nil || nodeInfo.Protocol == nil {
+		return false
+	}
+	mode := strings.TrimSpace(nodeInfo.Protocol.CertMode)
+	if mode == "" || mode == "none" {
+		return false
+	}
+	if nodeInfo.Protocol.Security == "tls" {
+		return true
+	}
+	switch nodeInfo.Type {
+	case "tuic", "hysteria", "hysteria2":
+		return true
+	default:
+		return false
+	}
+}
+
+func applyTLSSettings(nodeInfo *panel.NodeInfo, in *coreConf.InboundDetourConfig) {
+	identity := nodeInfo.Type
+	if nodeInfo.Protocol.ID != "" {
+		identity = nodeInfo.Protocol.ID
+	}
+	if in.StreamSetting == nil {
+		in.StreamSetting = &coreConf.StreamConfig{}
+	}
+	in.StreamSetting.Security = "tls"
+	// Only TLS 1.3 is accepted; the post-quantum hybrid key exchange is
+	// preferred, with plain X25519 as the fallback for clients without
+	// X25519MLKEM768 support (Go < 1.24 cores, older mobile clients).
+	curvePreferences := coreConf.StringList{"X25519MLKEM768", "X25519"}
+	in.StreamSetting.TLSSettings = &coreConf.TLSConfig{
+		MinVersion:       "1.3",
+		CurvePreferences: &curvePreferences,
+		Certs: []*coreConf.TLSCertConfig{
+			{
+				CertFile: filepath.Join("/etc/PPanel-node/", identity+strconv.Itoa(nodeInfo.Id)+".cer"),
+				KeyFile:  filepath.Join("/etc/PPanel-node/", identity+strconv.Itoa(nodeInfo.Id)+".key"),
+			},
+		},
+	}
+	if nodeInfo.Type == "hysteria2" || nodeInfo.Type == "hysteria" {
+		alpn := coreConf.StringList{"h3"}
+		in.StreamSetting.TLSSettings.ALPN = &alpn
+	}
 }
 
 func buildTransportSetting(nodeInfo *panel.NodeInfo) (*coreConf.StreamConfig, error) {

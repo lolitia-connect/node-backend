@@ -21,6 +21,19 @@ func TestValidateServerConfigRejectsMissingTransport(t *testing.T) {
 	}
 }
 
+func TestValidateServerConfigAcceptsMultipleMieruInstances(t *testing.T) {
+	protocols := []panel.Protocol{
+		{ID: "1", Type: "mieru", Enable: true, Port: 8443, Transport: "TCP"},
+		{ID: "2", Type: "mieru", Enable: true, Port: 8444, Transport: "UDP"},
+		{ID: "1", Type: "vless", Enable: true, Port: 443, Transport: "tcp"},
+	}
+	if err := ValidateServerConfig(&panel.ServerConfigResponse{
+		Data: &panel.Data{Protocols: &protocols},
+	}); err != nil {
+		t.Fatalf("ValidateServerConfig() error = %v", err)
+	}
+}
+
 func TestValidateServerConfigAcceptsVlessEncryption(t *testing.T) {
 	protocols := []panel.Protocol{{
 		Type:                 "vless",
@@ -130,5 +143,29 @@ func TestValidateServerConfigAcceptsRealityWithSNIAsDestHost(t *testing.T) {
 	})
 	if err != nil {
 		t.Fatalf("ValidateServerConfig() error = %v", err)
+	}
+}
+
+func TestValidateServerConfigRejectsNativeTLSManagedCertWithoutSNI(t *testing.T) {
+	protocols := []panel.Protocol{{Type: "tuic", Enable: true, Port: 443, CertMode: "dns"}}
+	err := ValidateServerConfig(&panel.ServerConfigResponse{Data: &panel.Data{Protocols: &protocols}})
+	if err == nil || !strings.Contains(err.Error(), "sni is required") {
+		t.Fatalf("ValidateServerConfig() error = %v, want SNI validation error", err)
+	}
+}
+
+func TestValidateServerConfigSkipsUnsupportedProtocol(t *testing.T) {
+	protocols := []panel.Protocol{{Type: "wireguard"}}
+	if err := ValidateServerConfig(&panel.ServerConfigResponse{Data: &panel.Data{Protocols: &protocols}}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestValidateServerConfigRejectsRemovedShadowsocksCipher(t *testing.T) {
+	for _, cipher := range []string{"none", "plain"} {
+		protocols := []panel.Protocol{{Type: "shadowsocks", Enable: true, Port: 443, Cipher: cipher}}
+		if err := ValidateServerConfig(&panel.ServerConfigResponse{Data: &panel.Data{Protocols: &protocols}}); err == nil {
+			t.Fatalf("accepted removed cipher %q", cipher)
+		}
 	}
 }

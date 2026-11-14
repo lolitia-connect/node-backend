@@ -12,16 +12,18 @@ import (
 	"github.com/perfect-panel/ppanel-node/conf"
 )
 
+const CertificateSHA256Header = "X-Node-Certificate-SHA256"
+
 type NodeClient struct {
-	Client     *resty.Client
-	APIHost    string
-	SecretKey  string
-	NodeType   string
-	ProtocolID string
-	NodeId     int
-	userEtag   string
-	UserList   *UserListBody
-	AliveMap   *AliveMap
+	Client      *resty.Client
+	APIHost     string
+	SecretKey   string
+	NodeType    string
+	ProtocolID  string
+	NodeId      int
+	UseProtobuf bool
+	userEtag    string
+	UserList    *UserListBody
 }
 
 type ServerClient struct {
@@ -31,6 +33,8 @@ type ServerClient struct {
 	ServerId         int
 	ServerConfigEtag string
 	responseBodyHash string
+	UseProtobuf      bool
+	useJSONConfig    bool
 }
 
 func NewNodeClient(c *conf.NodeApiConfig) (*NodeClient, error) {
@@ -42,26 +46,14 @@ func NewNodeClient(c *conf.NodeApiConfig) (*NodeClient, error) {
 		client.SetTimeout(30 * time.Second)
 	}
 	client.OnError(func(req *resty.Request, err error) {
-		var v *resty.ResponseError
-		if errors.As(err, &v) {
+		if v, ok := errors.AsType[*resty.ResponseError](err); ok {
 			logx.Component("panel").WithError(v.Err).Error("面板请求失败")
 		}
 	})
 	client.SetBaseURL(c.APIHost)
 	// Check node type
 	c.NodeType = strings.ToLower(c.NodeType)
-	switch c.NodeType {
-	case
-		"vmess",
-		"trojan",
-		"shadowsocks",
-		"tuic",
-		"hysteria",
-		"hysteria2",
-		"anytls",
-		"vless",
-		"mieru":
-	default:
+	if !IsSupportedProtocol(c.NodeType) {
 		return nil, fmt.Errorf("unsupported Node type: %s", c.NodeType)
 	}
 	// set params
@@ -72,15 +64,30 @@ func NewNodeClient(c *conf.NodeApiConfig) (*NodeClient, error) {
 		"secret_key":  c.SecretKey,
 	})
 	return &NodeClient{
-		Client:     client,
-		SecretKey:  c.SecretKey,
-		APIHost:    c.APIHost,
-		NodeType:   c.NodeType,
-		ProtocolID: c.ProtocolID,
-		NodeId:     c.NodeID,
-		UserList:   &UserListBody{},
-		AliveMap:   &AliveMap{},
+		Client:      client,
+		SecretKey:   c.SecretKey,
+		APIHost:     c.APIHost,
+		NodeType:    c.NodeType,
+		ProtocolID:  c.ProtocolID,
+		NodeId:      c.NodeID,
+		UseProtobuf: c.UseProtobuf,
+		UserList:    &UserListBody{},
 	}, nil
+}
+
+// SetCertificateSHA256 attaches the normalized certificate fingerprint to all
+// subsequent requests made by this node client. The fingerprint is set only
+// for self-signed nodes by the node controller.
+func (c *NodeClient) SetCertificateSHA256(fingerprint string) {
+	if c == nil || c.Client == nil {
+		return
+	}
+	fingerprint = strings.ToLower(strings.TrimSpace(fingerprint))
+	if fingerprint == "" {
+		c.Client.Header.Del(CertificateSHA256Header)
+		return
+	}
+	c.Client.SetHeader(CertificateSHA256Header, fingerprint)
 }
 
 func NewServerClient(c *conf.ServerApiConfig) *ServerClient {
@@ -92,8 +99,7 @@ func NewServerClient(c *conf.ServerApiConfig) *ServerClient {
 		client.SetTimeout(30 * time.Second)
 	}
 	client.OnError(func(req *resty.Request, err error) {
-		var v *resty.ResponseError
-		if errors.As(err, &v) {
+		if v, ok := errors.AsType[*resty.ResponseError](err); ok {
 			logx.Component("panel").WithError(v.Err).Error("面板请求失败")
 		}
 	})
@@ -106,5 +112,17 @@ func NewServerClient(c *conf.ServerApiConfig) *ServerClient {
 		APIHost:   c.ApiHost,
 		SecretKey: c.SecretKey,
 		ServerId:  c.ServerId,
+	}
+}
+
+// IsSupportedProtocol reports whether this node binary can consume and run a
+// server protocol. PPanel may return more protocol types than a node release
+// supports; callers use this to leave unsupported configurations untouched.
+func IsSupportedProtocol(protocol string) bool {
+	switch strings.ToLower(strings.TrimSpace(protocol)) {
+	case "vmess", "trojan", "shadowsocks", "tuic", "hysteria", "hysteria2", "anytls", "vless", "nowhere", "mieru":
+		return true
+	default:
+		return false
 	}
 }

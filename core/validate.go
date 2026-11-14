@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/perfect-panel/ppanel-node/api/panel"
+	"github.com/perfect-panel/ppanel-node/core/protocol/nowhere"
 )
 
 func ValidateServerConfig(serverconfig *panel.ServerConfigResponse) error {
@@ -18,6 +19,9 @@ func ValidateServerConfig(serverconfig *panel.ServerConfigResponse) error {
 		return fmt.Errorf("protocol config is nil")
 	}
 	for i, protocol := range *serverconfig.Data.Protocols {
+		if !panel.IsSupportedProtocol(protocol.Type) {
+			continue
+		}
 		if err := validateProtocol(protocol); err != nil {
 			return fmt.Errorf("protocol[%d] %s config invalid: %w", i, protocol.Type, err)
 		}
@@ -37,6 +41,8 @@ func validateProtocol(protocol panel.Protocol) error {
 	}
 
 	switch protocol.Type {
+	case "nowhere":
+		return nowhere.ValidateProtocol(protocol)
 	case "vless", "vmess", "trojan":
 		if err := validateStreamProtocol(protocol); err != nil {
 			return err
@@ -45,9 +51,15 @@ func validateProtocol(protocol panel.Protocol) error {
 		if strings.TrimSpace(protocol.Cipher) == "" {
 			return fmt.Errorf("cipher is required")
 		}
-	case "tuic", "hysteria", "hysteria2", "anytls", "mieru":
-	default:
-		return fmt.Errorf("unsupported protocol type")
+		switch strings.ToLower(strings.TrimSpace(protocol.Cipher)) {
+		case "none", "plain":
+			return fmt.Errorf("Shadowsocks cipher %q is no longer supported by Xray", protocol.Cipher)
+		}
+	case "tuic", "hysteria", "hysteria2":
+		if err := validateTLSConfig(protocol); err != nil {
+			return err
+		}
+	case "anytls", "mieru":
 	}
 	return nil
 }
