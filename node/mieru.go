@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"net/netip"
 	"strings"
 	"sync"
 	"time"
@@ -38,8 +39,11 @@ type MieruController struct {
 
 	userListMonitorPeriodic *task.Task
 	userReportPeriodic      *task.Task
+	onlinePeriodic          *task.Task
 
 	pendingTraffic map[int]panel.UserTraffic
+	pendingOnline  map[panel.OnlineUser]uint64
+	onlineSequence uint64
 	connections    map[*mieruConn]struct{}
 	serveDone      chan struct{}
 	traffic        *trafficQueue
@@ -62,6 +66,7 @@ func NewMieruController(config *conf.Conf, apiClient *panel.NodeClient, info *pa
 		config:         config,
 		apiClient:      apiClient,
 		pendingTraffic: make(map[int]panel.UserTraffic),
+		pendingOnline:  make(map[panel.OnlineUser]uint64),
 		connections:    make(map[*mieruConn]struct{}),
 		traffic:        newTrafficQueue(),
 	}
@@ -179,8 +184,8 @@ func (c *MieruController) Stop() error {
 		c.mu.Unlock()
 		return nil
 	}
-	monitor, report := c.userListMonitorPeriodic, c.userReportPeriodic
-	c.userListMonitorPeriodic, c.userReportPeriodic = nil, nil
+	monitor, report, online := c.userListMonitorPeriodic, c.userReportPeriodic, c.onlinePeriodic
+	c.userListMonitorPeriodic, c.userReportPeriodic, c.onlinePeriodic = nil, nil, nil
 	c.running = false
 	mux, server, done := c.mux, c.socks5Srv, c.serveDone
 	connections := make([]*mieruConn, 0, len(c.connections))
@@ -193,6 +198,9 @@ func (c *MieruController) Stop() error {
 	}
 	if report != nil {
 		report.Close()
+	}
+	if online != nil {
+		online.Close()
 	}
 	for _, connection := range connections {
 		_ = connection.Close()
@@ -228,10 +236,15 @@ func (c *MieruController) startTasks() {
 		Interval: time.Duration(c.info.PushInterval) * time.Second,
 		Execute:  c.reportUserTrafficTask,
 	}
+	c.onlinePeriodic = &task.Task{
+		Name: "mieruReportOnline", Interval: time.Duration(min(max(c.info.PushInterval, 1), 60)) * time.Second,
+		Execute: c.reportOnline,
+	}
 	_ = c.userListMonitorPeriodic.Start(false)
 	logx.Mieru(c.tag).Info("mieru 用户列表监控任务已启动")
 	_ = c.userReportPeriodic.Start(false)
 	logx.Mieru(c.tag).Info("mieru 用户流量报告任务已启动")
+	_ = c.onlinePeriodic.Start(false)
 }
 
 // userListMonitor periodically fetches the user list from the panel and updates mieru users.
@@ -293,6 +306,38 @@ func (c *MieruController) reportUserTrafficTask(ctx context.Context) error {
 	return c.apiClient.ReportNodeStatusContext(ctx, &panel.NodeStatus{
 		CPU: CPU, Mem: Mem, Disk: Disk, Uptime: Uptime,
 	})
+}
+
+func (c *MieruController) reportOnline(ctx context.Context) error {
+	c.mu.Lock()
+	users := make(map[panel.OnlineUser]uint64, len(c.pendingOnline))
+	for user, sequence := range c.pendingOnline {
+		users[user] = sequence
+	}
+	for connection := range c.connections {
+		if c.running && connection.online.UID != 0 && c.userIDs[connection.UserName()] == connection.online.UID {
+			users[connection.online] = c.pendingOnline[connection.online]
+		}
+	}
+	c.mu.Unlock()
+	online := make([]panel.OnlineUser, 0, len(users))
+	for user := range users {
+		online = append(online, user)
+	}
+	for start := 0; start < len(online); start += 10000 {
+		batch := online[start:min(start+10000, len(online))]
+		if err := c.apiClient.ReportNodeOnlineUsers(ctx, &batch); err != nil {
+			return err
+		}
+		c.mu.Lock()
+		for _, reported := range batch {
+			if c.pendingOnline[reported] == users[reported] {
+				delete(c.pendingOnline, reported)
+			}
+		}
+		c.mu.Unlock()
+	}
+	return nil
 }
 
 func (c *MieruController) collectTraffic(threshold int64) {
@@ -366,16 +411,24 @@ type mieruConn struct {
 	net.Conn
 	controller *MieruController
 	users      map[string]int
+	online     panel.OnlineUser
 }
 
 func (c *MieruController) updateUserIDs(users []panel.UserInfo) {
 	identities := make(map[string]int, len(users))
+	validIDs := make(map[int]struct{}, len(users))
 	for _, user := range users {
 		if user.Uuid != "" {
 			identities[user.Uuid] = user.Id
+			validIDs[user.Id] = struct{}{}
 		}
 	}
 	c.userIDs = identities
+	for user := range c.pendingOnline {
+		if _, valid := validIDs[user.UID]; !valid {
+			delete(c.pendingOnline, user)
+		}
+	}
 }
 
 func (connection *mieruConn) UserName() string {
@@ -418,6 +471,15 @@ func (connection *mieruConn) record(upload, download int64) {
 	controller := connection.controller
 	controller.mu.Lock()
 	defer controller.mu.Unlock()
+	if connection.online.UID == 0 && controller.running && controller.userIDs[connection.UserName()] == userID {
+		if host, _, err := net.SplitHostPort(connection.RemoteAddr().String()); err == nil {
+			if address, err := netip.ParseAddr(host); err == nil {
+				connection.online = panel.OnlineUser{UID: userID, IP: address.Unmap().String()}
+				controller.onlineSequence++
+				controller.pendingOnline[connection.online] = controller.onlineSequence
+			}
+		}
+	}
 	traffic := controller.pendingTraffic[userID]
 	traffic.UID = userID
 	traffic.Upload += upload

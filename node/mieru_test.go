@@ -25,6 +25,7 @@ func TestMieruTransportsRevokeUsersAndRestartWithoutPanel(t *testing.T) {
 	for _, transport := range []string{"tcp", "udp"} {
 		t.Run(transport, func(t *testing.T) {
 			var empty, unavailable atomic.Bool
+			var onlineReports atomic.Int32
 			const uuid = "00000000-0000-0000-0000-000000000017"
 			server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 				if request.URL.Query().Get("protocol_id") != "2" {
@@ -32,6 +33,18 @@ func TestMieruTransportsRevokeUsersAndRestartWithoutPanel(t *testing.T) {
 				}
 				if unavailable.Load() {
 					http.Error(writer, "offline", http.StatusServiceUnavailable)
+					return
+				}
+				if request.URL.Path == "/v1/server/online" {
+					var body panel.UserOnlineBody
+					if err := json.NewDecoder(request.Body).Decode(&body); err != nil {
+						t.Error(err)
+					}
+					if len(body.Users) != 1 || body.Users[0] != (panel.OnlineUser{UID: 17, IP: "127.0.0.1"}) {
+						t.Errorf("mieru %s online users = %+v", transport, body.Users)
+					}
+					onlineReports.Add(1)
+					fmt.Fprint(writer, `{"code":200}`)
 					return
 				}
 				users := []panel.UserInfo{{Id: 17, Uuid: uuid}}
@@ -101,6 +114,12 @@ func TestMieruTransportsRevokeUsersAndRestartWithoutPanel(t *testing.T) {
 			}
 			if reply[0] != 5 || reply[1] != 2 {
 				t.Fatalf("authenticated proxy reply = %v, want loopback rejection", reply)
+			}
+			if err := controller.reportOnline(t.Context()); err != nil {
+				t.Fatal(err)
+			}
+			if onlineReports.Load() != 1 {
+				t.Fatal("authenticated mieru session was not reported online")
 			}
 			_ = connection.Close()
 			controller.collectTraffic(0)
@@ -199,6 +218,147 @@ type mieruTestUserConn struct {
 
 func (connection *mieruTestUserConn) UserName() string {
 	return "echo-user"
+}
+
+func (connection *mieruTestUserConn) RemoteAddr() net.Addr {
+	return &net.TCPAddr{IP: net.ParseIP("::ffff:192.0.2.17"), Port: 12345}
+}
+
+func TestMieruOnlineReportsRetryShortAndActiveSessions(t *testing.T) {
+	var fail atomic.Bool
+	fail.Store(true)
+	var reports atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		if request.URL.Path != "/v1/server/online" || request.URL.Query().Get("protocol_id") != "2" {
+			t.Errorf("unexpected online request: %s", request.URL)
+		}
+		var body panel.UserOnlineBody
+		if err := json.NewDecoder(request.Body).Decode(&body); err != nil {
+			t.Error(err)
+		}
+		if len(body.Users) != 1 || body.Users[0] != (panel.OnlineUser{UID: 17, IP: "192.0.2.17"}) {
+			t.Errorf("online users = %+v", body.Users)
+		}
+		reports.Add(1)
+		if fail.Load() {
+			http.Error(writer, "retry", http.StatusServiceUnavailable)
+			return
+		}
+		fmt.Fprint(writer, `{"code":200}`)
+	}))
+	defer server.Close()
+	client, err := panel.NewNodeClient(&conf.NodeApiConfig{
+		APIHost: server.URL, NodeType: "mieru", ProtocolID: "2",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	controller := NewMieruController(conf.New(), client, &panel.NodeInfo{Type: "mieru"})
+	controller.running = true
+	controller.updateUserIDs([]panel.UserInfo{{Id: 17, Uuid: "echo-user"}})
+	connection := &mieruConn{Conn: &mieruTestUserConn{}, controller: controller, users: controller.userIDs}
+	controller.connections[connection] = struct{}{}
+	connection.record(1, 0)
+	if err := controller.reportOnline(t.Context()); err == nil {
+		t.Fatal("failed online report was acknowledged")
+	}
+	delete(controller.connections, connection)
+	fail.Store(false)
+	if err := controller.reportOnline(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if err := controller.reportOnline(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if reports.Load() != 2 {
+		t.Fatalf("short-session reports = %d, want one failure and one retry", reports.Load())
+	}
+	connection = &mieruConn{Conn: &mieruTestUserConn{}, controller: controller, users: controller.userIDs}
+	controller.connections[connection] = struct{}{}
+	connection.record(0, 1)
+	for range 2 {
+		if err := controller.reportOnline(t.Context()); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if reports.Load() != 4 {
+		t.Fatalf("active-session reports = %d, want repeated heartbeat without traffic", reports.Load())
+	}
+	delete(controller.connections, connection)
+	if err := controller.reportOnline(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if reports.Load() != 4 {
+		t.Fatal("closed acknowledged session was renewed")
+	}
+}
+
+func TestMieruOnlineReportBatchesAndPreservesNewSessions(t *testing.T) {
+	var reports, total atomic.Int32
+	var controller *MieruController
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		var body panel.UserOnlineBody
+		if err := json.NewDecoder(request.Body).Decode(&body); err != nil {
+			t.Error(err)
+		}
+		if len(body.Users) == 0 || len(body.Users) > 10000 {
+			t.Errorf("invalid online batch size: %d", len(body.Users))
+		}
+		total.Add(int32(len(body.Users)))
+		if reports.Add(1) == 1 {
+			controller.mu.Lock()
+			for _, user := range body.Users {
+				controller.onlineSequence++
+				controller.pendingOnline[user] = controller.onlineSequence
+			}
+			controller.mu.Unlock()
+		}
+		fmt.Fprint(writer, `{"code":200}`)
+	}))
+	defer server.Close()
+	client, err := panel.NewNodeClient(&conf.NodeApiConfig{APIHost: server.URL, NodeType: "mieru"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	controller = NewMieruController(conf.New(), client, &panel.NodeInfo{Type: "mieru"})
+	for index := range 10001 {
+		controller.onlineSequence++
+		controller.pendingOnline[panel.OnlineUser{UID: 17, IP: fmt.Sprintf("10.0.%d.%d", index/256, index%256)}] = controller.onlineSequence
+	}
+	if err := controller.reportOnline(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if reports.Load() != 2 || total.Load() != 10001 || len(controller.pendingOnline) != 10000 {
+		t.Fatalf("reports = %d, total = %d, pending = %d", reports.Load(), total.Load(), len(controller.pendingOnline))
+	}
+	if err := controller.reportOnline(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if reports.Load() != 3 || total.Load() != 20001 || len(controller.pendingOnline) != 0 {
+		t.Fatalf("retry reports = %d, total = %d, pending = %d", reports.Load(), total.Load(), len(controller.pendingOnline))
+	}
+}
+
+func TestMieruOnlineReportsExcludeRevokedUsers(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		t.Error("revoked session was reported online")
+		fmt.Fprint(writer, `{"code":200}`)
+	}))
+	defer server.Close()
+	client, err := panel.NewNodeClient(&conf.NodeApiConfig{APIHost: server.URL, NodeType: "mieru"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	controller := NewMieruController(conf.New(), client, &panel.NodeInfo{Type: "mieru"})
+	controller.running = true
+	controller.updateUserIDs([]panel.UserInfo{{Id: 17, Uuid: "echo-user"}})
+	connection := &mieruConn{Conn: &mieruTestUserConn{}, controller: controller, users: controller.userIDs}
+	controller.connections[connection] = struct{}{}
+	connection.record(1, 0)
+	controller.updateUserIDs(nil)
+	if err := controller.reportOnline(t.Context()); err != nil {
+		t.Fatal(err)
+	}
 }
 
 func TestMieruSessionForwardsAndCountsBothDirections(t *testing.T) {
