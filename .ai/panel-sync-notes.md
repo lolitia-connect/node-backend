@@ -1,8 +1,32 @@
 # Panel contract notes (for node / upstream syncs)
 
-## Current sync: official v1.2.0 (2026-11-14)
+> **当前入口（2026-11-20）**：[台账索引](./sync-diffs/README.md) → [当前定制说明](./sync-diffs/v1.2.0-local-2026-11-20.md) / [完整本地差异索引](./sync-diffs/v1.2.0-local-2026-11-20.files.md) → [开发约束](./prompts/current-customizations.md)。历史同步与全路径对照见 [v1.1.5 → v1.2.0](./sync-diffs/v1.1.5-to-v1.2.0.md)。保留本文件作为旧链接兼容入口；以下 11 月 14 日、10 月 5 日段落是历史证据，不是当前能力清单。
 
-This section supersedes historical node capability statements below.
+## Panel re-sync reconciliation (2026-11-19): backend now at v1.21.7
+
+这段对账在 11 月 19 日执行；11 月 20 日归档时校正措辞和版本边界。node 产品 HEAD 仍是 `55e8776`，本轮初次检查已有未提交的本文件，不能笼统声称当前工作树 clean。backend 当前固定为 `57973bf2`（本地同步落点 `34fd88c8`、官方目标 v1.21.7）；先前引用的 `dc46571f` 是较早快照。11 月 20 日 00:38 +08:00 检查相关路由、device handler、NW3 用户转换与 pin 模型/逻辑未相对该 backend HEAD 改动，但其余工作树另有并行内容。
+
+### 已有实现：源码契约一致，不等于真实联调验收
+
+- **设备接口**：backend [native_routes.go](../../backend/internal/handler/native_routes.go)已有 alive/device/online 路由。node [Xray controller](../node/controller.go)在 Prepare 探测 alive，明确 HTTP 404/405 才选本地模式，成功模式在 Start 安装 ClaimDevice；[定时任务](../node/task.go)刷新计数与独立保活。claim/response/alive/online 的 JSON/Protobuf 字段有对应实现。运行中本地模式不自动发现 panel 升级；Mieru 仅上报 online，未接入 Xray 全局设备准入。
+- **NW3**：backend [nowhere.go](../../backend/internal/model/node/nowhere.go)在投影时将旧 version 0/1 升到 3，ALPN 为 `nw3`，obfs 为空默认 `morph`、显式 `none` 保留；[用户列表](../../backend/internal/logic/server/getServerUserListLogic.go)把 Nowhere UUID 转为 32 位小写 hex。node 已有 NW3 adapter 和 `/v2` config 客户端。旧 `now/1` 说明不再代表当前输出，但未执行外部 Rust/panel 联调。
+- **self pin**：node [certificate helper](../node/cert.go)设置 `X-Node-Certificate-SHA256`，backend [status handler](../../backend/internal/handler/server/serverPushStatusHandler.go)读取并保存。不是所有请求都消费该 header；backend [ApplyReportedCertPin](../../backend/internal/model/node/cert_pin.go)按协议 type 更新 self 实例，不按 protocol_id 隔离，因此不能声称 pin 已逐实例正确联调。
+- **配置 fallback 保留**：两侧 ServerProtocol 的字段号/类型对应且止于 65，但整份 proto（包名、路径、注释等）不应称为字节相同；没有实例 id/name。node 遇到非空 Protobuf 协议数组后改取并记住 JSON config，同时保留用户/报告 Protobuf。`cert_pin_sha256` 是订阅客户端字段，不是当前 node config DTO 输入。
+
+### 验证与仍未完成
+
+11 月 19 日本会话已运行 Windows Go 1.27.1 的 node build、主模块/Nowhere 独立模块测试，以及 `Nowhere|Validate` 选择器。测试输出为通过；选择器中 `TestNowhereRustInterop` 明确跳过（缺少 binary）。完整命令、构建管道证据限制和执行日期见[当前台账验证表](./sync-diffs/v1.2.0-local-2026-11-20.md)。11 月 20 日只整理文档，未重跑业务检查。
+
+- **SSR 仍没有 node inbound**；socks/http/naive 也仍不是 node 支持协议。不能把 panel 接受当作 node 可服务，也不能只打开 accept-list。
+- Linux `-race`、Unix 权限、静态构建、真实 panel/Redis 多节点、生产部署、独立 Rust NW3 客户端没有新增结果；不是宣称 Windows 环境绝对无法配置这些工具。
+- Mieru 独立数据面不执行 Xray 限速/设备准入；流量队列仅内存、没有 node 上报稳定幂等 ID。当前台账保留这些限制，不将文档补账当成补完功能。
+
+---
+
+## Historical: node sync official v1.2.0 (2026-11-14)
+
+This section records the v1.2.0 node sync as it stood then; where it describes
+panel capabilities, the reconciliation section above supersedes it.
 
 - Node source target: official `v1.2.0`, commit `8bd89c3`.
 - Panel contract baseline: backend `9b26e0c364d17cde1bc60480d58b4b300ebf56b0`.
