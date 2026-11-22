@@ -90,6 +90,21 @@ func (vc *XrayCore) DelUsers(users []panel.UserInfo, tag string, _ *panel.NodeIn
 	return nil
 }
 
+func (vc *XrayCore) ClearNodeUsers(tag string) {
+	vc.users.mapLock.Lock()
+	defer vc.users.mapLock.Unlock()
+	prefix := format.UserTag(tag, "")
+	for email := range vc.users.uidMap {
+		if strings.HasPrefix(email, prefix) {
+			delete(vc.users.uidMap, email)
+			if links, ok := vc.dispatcher.LinkManagers.LoadAndDelete(email); ok {
+				links.(*dispatcher.LinkManager).CloseAll()
+			}
+		}
+	}
+	vc.dispatcher.Counter.Delete(tag)
+}
+
 func (vc *XrayCore) GetUserTrafficSlice(tag string, mintraffic int) ([]panel.UserTraffic, error) {
 	trafficSlice := make([]panel.UserTraffic, 0)
 	vc.users.mapLock.RLock()

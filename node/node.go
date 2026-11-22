@@ -36,11 +36,17 @@ func New(core *vCore.XrayCore, config *conf.Conf, serverconfig *panel.ServerConf
 		pullinterval = 60
 	}
 	node.pushInterval = time.Duration(pushinterval) * time.Second
+	seen := make(map[protocolKey]bool, len(*serverconfig.Data.Protocols))
 	for _, nodeconfig := range *serverconfig.Data.Protocols {
 		if !panel.IsSupportedProtocol(nodeconfig.Type) {
 			logx.Component("node").WithField("protocol", nodeconfig.Type).Warn("节点不支持该协议，已跳过对应配置")
 			continue
 		}
+		key := protocolIdentity(&nodeconfig)
+		if seen[key] {
+			return nil, fmt.Errorf("duplicate protocol instance %s(%s)", key.typ, key.id)
+		}
+		seen[key] = true
 		n := &panel.NodeInfo{
 			Id:                     config.ApiConfig.ServerId,
 			Type:                   nodeconfig.Type,
@@ -138,11 +144,22 @@ func (n *Node) Start() error {
 			}
 		}
 	}
+	n.startReporter()
+	return nil
+}
+
+func (n *Node) startReporter() {
 	if n.reportPeriodic == nil {
 		n.reportPeriodic = &task.Task{Name: "reportNode", Interval: n.pushInterval, Execute: n.report}
 		_ = n.reportPeriodic.Start(false)
 	}
-	return nil
+}
+
+func (n *Node) stopReporter() {
+	if n.reportPeriodic != nil {
+		n.reportPeriodic.Close()
+		n.reportPeriodic = nil
+	}
 }
 
 func (n *Node) report(ctx context.Context) error {
@@ -171,10 +188,7 @@ func (n *Node) Stop() error {
 	if n == nil {
 		return nil
 	}
-	if n.reportPeriodic != nil {
-		n.reportPeriodic.Close()
-		n.reportPeriodic = nil
-	}
+	n.stopReporter()
 	var result error
 	for _, c := range n.controllers {
 		result = errors.Join(result, c.Stop())

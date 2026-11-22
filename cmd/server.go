@@ -130,14 +130,14 @@ func serverHandle(_ *cobra.Command, _ []string) {
 		case <-osSignals:
 			return
 		case <-reloadCh:
-			logx.Component("server").Info("收到重载信号，正在重新加载配置")
-			newLogHandle, err := reload(config, &nodes, &xraycore, logHandle)
-			if err != nil {
-				logx.Component("server").WithError(err).Error("重载失败")
-				continue
-			}
-			logHandle = newLogHandle
 		}
+		logx.Component("server").Info("收到重载信号，正在重新加载配置")
+		newLogHandle, err := reload(config, &nodes, &xraycore, logHandle)
+		if err != nil {
+			logx.Component("server").WithError(err).Error("重载失败")
+			continue
+		}
+		logHandle = newLogHandle
 	}
 }
 
@@ -161,6 +161,21 @@ func reload(config string, nodes **node.Node, xcore **core.XrayCore, logHandle *
 	}
 	if err := core.ValidateServerConfig(serverconfig); err != nil {
 		return logHandle, err
+	}
+
+	if (*xcore).CanReuse(newConf, serverconfig) {
+		next, err := node.New(*xcore, newConf, serverconfig)
+		if err != nil {
+			return logHandle, err
+		}
+		changed, err := (*nodes).Reload(next)
+		if err != nil {
+			return logHandle, err
+		}
+		if changed {
+			logx.Component("server").Info("协议配置热重载成功")
+		}
+		return logHandle, nil
 	}
 
 	newCore := core.New(newConf, p)

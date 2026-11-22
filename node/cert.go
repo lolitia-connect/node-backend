@@ -58,6 +58,7 @@ func (c *Controller) enqueueReload() {
 	if c == nil || c.server == nil || c.server.ReloadCh == nil {
 		return
 	}
+	c.certificateReload.Store(true)
 	select {
 	case c.server.ReloadCh <- struct{}{}:
 	default:

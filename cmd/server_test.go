@@ -93,6 +93,13 @@ func TestReloadPreservesServiceAndRollsBackWithoutPanel(t *testing.T) {
 		}
 	}
 	oldNodes, oldCore := nodes, xcore
+	changedListener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	changedPort := changedListener.Addr().(*net.TCPAddr).Port
+	changedListener.Close()
+	port.Store(int32(changedPort))
 	failUsers.Store(true)
 	if _, err := reload(path, &nodes, &xcore, nil); err == nil {
 		t.Fatal("expected preparation failure")
@@ -130,8 +137,8 @@ func TestReloadPreservesServiceAndRollsBackWithoutPanel(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer handle.Close()
-	if xcore == oldCore || nodes == oldNodes || xcore.ReloadCh != reloadCh {
-		t.Fatal("successful reload did not replace instances and retain reload channel")
+	if xcore != oldCore || nodes != oldNodes || xcore.ReloadCh != reloadCh {
+		t.Fatal("protocol-only reload replaced the shared core or node container")
 	}
 	assertAvailable()
 }

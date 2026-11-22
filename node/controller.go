@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"sync/atomic"
 
 	"github.com/perfect-panel/ppanel-node/api/panel"
 	"github.com/perfect-panel/ppanel-node/common/logx"
@@ -30,6 +31,7 @@ type Controller struct {
 	traffic                 *trafficQueue
 	prepared                bool
 	started                 bool
+	certificateReload       atomic.Bool
 	inboundConfig           *xray.InboundHandlerConfig
 }
 
@@ -94,16 +96,18 @@ func (c *Controller) Start() error {
 	if err := c.Prepare(); err != nil {
 		return err
 	}
+	if err := c.server.AddNodeConfig(c.inboundConfig); err != nil {
+		return err
+	}
+	c.started = true
 	if c.limiter == nil {
 		c.limiter = c.server.LimiterManager.Add(c.tag, c.userList, c.aliveMap, c.info.Type)
 		if !c.localDeviceLimits {
 			c.limiter.SetDeviceAdmission(c.apiClient.ClaimDevice)
 		}
+	} else {
+		c.server.LimiterManager.Set(c.tag, c.limiter)
 	}
-	if err := c.server.AddNodeConfig(c.inboundConfig); err != nil {
-		return err
-	}
-	c.started = true
 	added, err := c.server.AddUsers(&vCore.AddUsersParams{
 		Tag:      c.tag,
 		Users:    c.userList,
@@ -139,22 +143,18 @@ func (c *Controller) Stop() error {
 		return nil
 	}
 	if err := c.server.DelNode(c.tag); err != nil {
+		c.startTasks(c.info)
 		return err
 	}
 	c.started = false
 	c.collectTraffic(0)
+	c.server.ClearNodeUsers(c.tag)
+	c.server.LimiterManager.Delete(c.tag)
 	return nil
 }
 
 func (c *Controller) Close() error {
-	if c == nil {
-		return nil
-	}
-	err := c.Stop()
-	if c.server != nil && c.server.LimiterManager != nil && c.tag != "" {
-		c.server.LimiterManager.Delete(c.tag)
-	}
-	return err
+	return c.Stop()
 }
 
 func (c *Controller) buildNodeTag(node *panel.NodeInfo) string {

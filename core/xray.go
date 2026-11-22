@@ -3,6 +3,7 @@ package core
 import (
 	"context"
 	"fmt"
+	"reflect"
 	"sync"
 	"time"
 
@@ -34,6 +35,8 @@ type XrayCore struct {
 	Config                      *conf.Conf
 	Client                      *panel.ServerClient
 	ReloadCh                    chan struct{}
+	sharedConfig                panel.Data
+	useProtobuf                 bool
 	serverConfigMonitorPeriodic *task.Task
 	access                      sync.Mutex
 	Server                      *core.Instance
@@ -77,8 +80,29 @@ func (v *XrayCore) Start(serverconfig *panel.ServerConfigResponse) error {
 	v.ohm = v.Server.GetFeature(outbound.ManagerType()).(outbound.Manager)
 	v.dispatcher = v.Server.GetFeature(routing.DispatcherType()).(*dispatcher.DefaultDispatcher)
 	v.dispatcher.LimiterManager = v.LimiterManager
+	v.sharedConfig = sharedServerConfig(serverconfig)
+	v.useProtobuf = serverconfig.UseProtobuf
 	v.startTasks(serverconfig)
 	return nil
+}
+
+// CanReuse reports whether the shared core and panel settings stay the same.
+func (v *XrayCore) CanReuse(config *conf.Conf, serverconfig *panel.ServerConfigResponse) bool {
+	return v != nil && v.Config != nil && *v.Config == *config &&
+		v.useProtobuf == serverconfig.UseProtobuf && reflect.DeepEqual(v.sharedConfig, sharedServerConfig(serverconfig))
+}
+
+func sharedServerConfig(serverconfig *panel.ServerConfigResponse) panel.Data {
+	data := *serverconfig.Data
+	data.Protocols = nil
+	data.Total = 0
+	if data.PullInterval <= 0 {
+		data.PullInterval = 60
+	}
+	if data.PushInterval <= 0 {
+		data.PushInterval = 60
+	}
+	return data
 }
 
 func (v *XrayCore) Close() error {

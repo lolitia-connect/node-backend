@@ -68,10 +68,14 @@ func (m *Manager) Add(tag string, users []panel.UserInfo, aliveList map[int]int,
 		info.UserLimitInfo.Store(format.UserTag(tag, users[i].Uuid), userLimit)
 	}
 	info.UUIDtoUID = uuidmap
+	m.Set(tag, info)
+	return info
+}
+
+func (m *Manager) Set(tag string, info *Limiter) {
 	m.lock.Lock()
 	m.limiters[tag] = info
 	m.lock.Unlock()
-	return info
 }
 
 func (m *Manager) Get(tag string) (info *Limiter, err error) {
