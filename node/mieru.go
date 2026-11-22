@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 	"net"
 	"net/netip"
 	"strings"
@@ -83,7 +84,7 @@ func (c *MieruController) Prepare() error {
 		return fmt.Errorf("mieru %s: get user list: %w", c.tag, err)
 	}
 	c.userList = users
-	c.updateUserIDs(users)
+	c.updateUserIDs(buildMieruUserIDs(users))
 	c.prepared = true
 	return nil
 }
@@ -258,14 +259,14 @@ func (c *MieruController) userListMonitor(ctx context.Context) error {
 		return nil // 304 Not Modified
 	}
 
+	userIDs := buildMieruUserIDs(newU)
 	c.mu.Lock()
 	if !c.running {
 		c.mu.Unlock()
 		return nil
 	}
-	deleted, added := compareUserList(c.userList, newU)
 	var revoked []*mieruConn
-	if len(deleted) > 0 || len(added) > 0 {
+	if !maps.Equal(c.userIDs, userIDs) {
 		c.collectTrafficLocked(0)
 		mieruUsers := buildMieruUsers(newU)
 		if c.mux != nil {
@@ -277,19 +278,19 @@ func (c *MieruController) userListMonitor(ctx context.Context) error {
 				return err
 			}
 		}
-		c.userList = newU
-		c.updateUserIDs(newU)
+		c.updateUserIDs(userIDs)
 		for connection := range c.connections {
-			for _, user := range deleted {
-				if connection.UserName() == user.Uuid {
-					revoked = append(revoked, connection)
-					break
-				}
+			name := connection.UserName()
+			oldID, known := connection.users[name]
+			currentID, current := userIDs[name]
+			if known && (!current || currentID != oldID) {
+				revoked = append(revoked, connection)
 			}
 		}
 
-		logx.Mieru(c.tag).Infof("mieru 用户列表已更新: 添加 %d, 删除 %d", len(added), len(deleted))
+		logx.Mieru(c.tag).Infof("mieru 认证用户已更新: 当前 %d 个", len(userIDs))
 	}
+	c.userList = newU
 	c.mu.Unlock()
 	for _, connection := range revoked {
 		_ = connection.Close()
@@ -414,14 +415,20 @@ type mieruConn struct {
 	online     panel.OnlineUser
 }
 
-func (c *MieruController) updateUserIDs(users []panel.UserInfo) {
+func buildMieruUserIDs(users []panel.UserInfo) map[string]int {
 	identities := make(map[string]int, len(users))
-	validIDs := make(map[int]struct{}, len(users))
 	for _, user := range users {
 		if user.Uuid != "" {
 			identities[user.Uuid] = user.Id
-			validIDs[user.Id] = struct{}{}
 		}
+	}
+	return identities
+}
+
+func (c *MieruController) updateUserIDs(identities map[string]int) {
+	validIDs := make(map[int]struct{}, len(identities))
+	for _, id := range identities {
+		validIDs[id] = struct{}{}
 	}
 	c.userIDs = identities
 	for user := range c.pendingOnline {

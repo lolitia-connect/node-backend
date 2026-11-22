@@ -21,10 +21,10 @@ import (
 	"google.golang.org/protobuf/proto"
 )
 
-func TestMieruTransportsRevokeUsersAndRestartWithoutPanel(t *testing.T) {
+func TestMieruTransportsRefreshUsersAndRestartWithoutPanel(t *testing.T) {
 	for _, transport := range []string{"tcp", "udp"} {
 		t.Run(transport, func(t *testing.T) {
-			var empty, unavailable atomic.Bool
+			var empty, unavailable, limitsChanged atomic.Bool
 			var onlineReports atomic.Int32
 			const uuid = "00000000-0000-0000-0000-000000000017"
 			server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
@@ -48,6 +48,10 @@ func TestMieruTransportsRevokeUsersAndRestartWithoutPanel(t *testing.T) {
 					return
 				}
 				users := []panel.UserInfo{{Id: 17, Uuid: uuid}}
+				if limitsChanged.Load() {
+					users[0].SpeedLimit = 100
+					users[0].DeviceLimit = 2
+				}
 				if empty.Load() {
 					users = []panel.UserInfo{}
 				}
@@ -105,8 +109,30 @@ func TestMieruTransportsRevokeUsersAndRestartWithoutPanel(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if _, err := connection.Write(request); err != nil {
+			defer connection.Close()
+			if _, err := connection.Write(request[:3]); err != nil {
 				t.Fatal(err)
+			}
+			// Wait for the server to read the partial request before refreshing the user.
+			for deadline := time.Now().Add(3 * time.Second); ; {
+				controller.mu.Lock()
+				seen := len(controller.pendingOnline) > 0
+				controller.mu.Unlock()
+				if seen {
+					break
+				}
+				if time.Now().After(deadline) {
+					t.Fatal("server did not read the partial SOCKS5 request")
+				}
+				time.Sleep(5 * time.Millisecond)
+			}
+			limitsChanged.Store(true)
+			if err := controller.userListMonitor(t.Context()); err != nil {
+				t.Fatal(err)
+			}
+			_ = connection.SetDeadline(time.Now().Add(3 * time.Second))
+			if _, err := connection.Write(request[3:]); err != nil {
+				t.Fatalf("complete SOCKS5 request after limit update: %v", err)
 			}
 			reply := make([]byte, 10)
 			if _, err := io.ReadFull(connection, reply); err != nil {
@@ -255,7 +281,7 @@ func TestMieruOnlineReportsRetryShortAndActiveSessions(t *testing.T) {
 	}
 	controller := NewMieruController(conf.New(), client, &panel.NodeInfo{Type: "mieru"})
 	controller.running = true
-	controller.updateUserIDs([]panel.UserInfo{{Id: 17, Uuid: "echo-user"}})
+	controller.updateUserIDs(map[string]int{"echo-user": 17})
 	connection := &mieruConn{Conn: &mieruTestUserConn{}, controller: controller, users: controller.userIDs}
 	controller.connections[connection] = struct{}{}
 	connection.record(1, 0)
@@ -351,7 +377,7 @@ func TestMieruOnlineReportsExcludeRevokedUsers(t *testing.T) {
 	}
 	controller := NewMieruController(conf.New(), client, &panel.NodeInfo{Type: "mieru"})
 	controller.running = true
-	controller.updateUserIDs([]panel.UserInfo{{Id: 17, Uuid: "echo-user"}})
+	controller.updateUserIDs(map[string]int{"echo-user": 17})
 	connection := &mieruConn{Conn: &mieruTestUserConn{}, controller: controller, users: controller.userIDs}
 	controller.connections[connection] = struct{}{}
 	connection.record(1, 0)
@@ -379,7 +405,7 @@ func TestMieruSessionForwardsAndCountsBothDirections(t *testing.T) {
 	}()
 	controller := NewMieruController(conf.New(), &panel.NodeClient{}, &panel.NodeInfo{Type: "mieru"})
 	controller.running = true
-	controller.updateUserIDs([]panel.UserInfo{{Id: 17, Uuid: "echo-user"}})
+	controller.updateUserIDs(map[string]int{"echo-user": 17})
 	client, incoming := net.Pipe()
 	defer client.Close()
 	_ = client.SetDeadline(time.Now().Add(3 * time.Second))

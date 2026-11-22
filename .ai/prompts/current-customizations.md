@@ -20,7 +20,7 @@
 
 ## 数据面、生命周期与上报
 
-- Xray controller 与 Mieru controller 是两条数据面。Mieru 保留 UUID 作为用户名/密码、空 UUID 过滤、TCP/UDP、multiplex、会话级计数、空用户恢复和撤销关闭会话。
+- Xray controller 与 Mieru controller 是两条数据面。Mieru 保留 UUID 作为用户名/密码、空 UUID 过滤、TCP/UDP、multiplex、会话级计数、空用户恢复和撤销关闭会话。刷新时按 UUID 与用户 ID 判断身份变化，限速或设备额度字段变化时保留现有会话。
 - **Mieru 在线上报不等于全局设备准入。** 它不经过 Xray dispatcher/限速/设备 limiter；不得把 Xray 的租约、退避与配额保证写成对所有协议成立。
 - C01 在线心跳间隔为 1–60 秒；按订阅 ID/IP 去重、IPv4-mapped 地址归一化、每批不超过 10000。失败保留 pending，ACK 只清除同序列记录；上报期间新会话不可被旧 ACK 删除。已登记持续会话可无流量保活，撤销和关闭后不得无限续租。
 - 设备接口仅在 alive 请求明确 HTTP 404/405 时于准备阶段选择本地回退。其他失败不放行；不要把启动探测描述成运行中自动发现 panel 升级。需要重新准备 controller 才重新选择能力。
